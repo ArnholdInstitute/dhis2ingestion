@@ -1,13 +1,24 @@
+"""
+This program is designed to scrape metadata from a DHIS2 system and output it in human-readable format.
+It expects there to be a JSON file containing base URL, username and password information, with
+the location of the file stored in a .env variable.
+"""
+
 from xml.dom import minidom
+import argparse
 import getpass
 import os
 import re
 import urllib2
 import csv
 import requests
+import json
 
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
-dhis_url = 'senegal.dhis2.org/dhis'
+dhis_params_dict = {}
+#dhis_url = 'senegal.dhis2.org/dhis'
 
 # prints all indicators in the malaria indicator group; 
 # higher level function that retrieves the numerator and denominator of
@@ -137,16 +148,38 @@ def getDescription(indicatorId):
 			values[key] = value.encode('utf-8')
 		writer.writerow(values)
 
+
 # currently I am redirected to the login page for DHIS2 - want to look up how to log in w/ credentials then navigate to the proper url
-def navigate(lvl, iid, session):
-	return None
+def navigate(full_login_url, lvl, iid, session):
+  navigate_url = 'https://' + full_login_url + '/api/' + lvl + '/' + iid
+  r = requests.get(navigate_url)
+	return r.content
 
 
 # constructs the url the given data - inputs are the level and the id
-def constructHyperLink(lvl, iid, friendlyName):
-	base_url = 'https://' + dhis_url + '/api/' + lvl + '/' + iid
-	return '=HYPERLINK(\"' + base_url + '\",' + '\"' + friendlyName + '\")'
-	
+def constructUrl(display_url, lvl, iid, friendlyName):
+	output_url = 'https://' + display_url + '/api/' + lvl + '/' + iid
+	return '=HYPERLINK(\"' + output_url + '\",' + '\"' + friendlyName + '\")'
+  
+
+# We expect dhis_params_dict to be a dictionary keyed by country; we expect
+# values to be dicts having "baseUrl", "username", and "password" as keys.
+# This dictionary should be stored in a JSON file.
+# The path to this file should be stored in an environment variable named
+# DHIS2_PARAMS_FILE.
+# This returns a pair [full_login_url, display_url]; the former has username/
+# password inherent in it and is never put into output.
+def constructDhisUrls(country):
+  if country not in dhis_params_dict:
+    dhis_params_file = os.environ['DHIS2_PARAMS_FILE']
+    with open(dhis_params_file, 'r') as ofh:
+      dhis_params_dict = json.load(ofh)
+
+  return ['https://' + dhis_params_dict[country]['username'] + ':' +
+            dhis_params_dict[country]['password'] + '@' +
+            dhis_params_dict[country]['baseUrl'],
+          'https://' + dhis_params_dict[country]['baseUrl']]
+         
 # with requests.Session() as s:
 # 	p = s.post(login_url, data=payload)
 # 	print p.text
@@ -156,6 +189,42 @@ def constructHyperLink(lvl, iid, friendlyName):
 # 	#navigate('indicators', 'iCA0KZXvXuZ', s)
 
 #parse('malariaindicators.xml')
-getDescription('TdWw71NnOoQ')
+#getDescription('TdWw71NnOoQ')
 #getDescription('gQvoDVLOyh1')
 #navigate('indicators', 'iCA0KZXvXuZ')
+
+class dhisParser():
+  """ A class to parse DHIS2 system metadata
+  
+      :param country: country/DHIS2 system identifier
+      :param indicator_group: specific indicatorGroup/dataElementGroup of interest
+  """
+  def __init__(self, country, indicator_group):
+    self.country = country
+    self.full_login_url, self.display_url = constructDhisUrls(country)
+    
+    ig_metadata_url = self.full_login_url + '/api/identifiableObjects/' + indicator_group
+    r = requests.get(ig_metadata_url)
+    parsed_metadata = minidom.parse(r.content)
+
+    ig_url = parsedFile.getElementsByTagName('identifiableObject').get('href')
+    ig_relative_path = ig_url.split('/')[-2:].join('/')
+    ig_authenticated_url = self.full_login_url + '/api' + ig_relative_path
+    
+    # This contains the parsed XML DOM of the indicator group, from which we can
+    # retrieve a list of indicator ids.
+    self.indicator_group = minidom.parse(requests.get(ig_authenticated_url).content)
+
+    
+
+if __name__ == '__main__':
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--country', default='Senegal',
+                      help='Which country\'s DHIS2 system are we scraping')
+  parser.add_argument('--output', default='testoutput.csv', help='Output file')
+  parser.add_argument('--indicator_group', default='',
+                      help='Specific indicatorGroup / dataElementGroup of interest')
+  args = parser.parse_args()
+  
+  dhis_parser = dhisParser(args.country, args.indicator_group)
+
