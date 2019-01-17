@@ -210,7 +210,7 @@ class dhisParser():
     parsed_metadata = minidom.parse(r.content)
 
     group_url = parsedFile.getElementsByTagName('identifiableObject').get('href')
-    group_type = ig_url.split('/')[-2]
+    group_type = group_url.split('/')[-2]
     authenticated_group_url = self.full_login_url + '/api' + group_type + '/' +\
                               self.group
     
@@ -218,7 +218,7 @@ class dhisParser():
     # retrieve a list of indicator ids.
     group_xml = minidom.parse(requests.get(authenticated_group_url).content)
     self.element_type = (group_type == 'indicatorGroup') ? 'indicator' : 'dataElement'
-    self.element_ids = ig_xml.getElementsByTagName('elt_type')
+    self.element_ids = group_xml.getElementsByTagName('elt_type')
     
   def constructElementUrl(element_id):
     return self.full_login_url + '/api/' + self.element_type + '/' + element_id
