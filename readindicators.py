@@ -199,24 +199,33 @@ class dhisParser():
       :param country: country/DHIS2 system identifier
       :param indicator_group: specific indicatorGroup/dataElementGroup of interest
   """
-  def __init__(self, country, indicator_group):
+  def __init__(self, country, group_id):
     self.country = country
     self.full_login_url, self.display_url = constructDhisUrls(country)
-    self.indicator_group = indicator_group
+    self.group = group_id
     
-    ig_metadata_url = self.full_login_url + '/api/identifiableObjects/' + indicator_group
-    r = requests.get(ig_metadata_url)
+    group_metadata_url = self.full_login_url + '/api/identifiableObjects/' +\
+                         self.group
+    r = requests.get(group_metadata_url)
     parsed_metadata = minidom.parse(r.content)
 
-    ig_url = parsedFile.getElementsByTagName('identifiableObject').get('href')
-    ig_relative_path = ig_url.split('/')[-2:].join('/')
-    ig_authenticated_url = self.full_login_url + '/api' + ig_relative_path
+    group_url = parsedFile.getElementsByTagName('identifiableObject').get('href')
+    group_type = ig_url.split('/')[-2]
+    authenticated_group_url = self.full_login_url + '/api' + group_type + '/' +\
+                              self.group
     
     # This contains the parsed XML DOM of the indicator group, from which we can
     # retrieve a list of indicator ids.
-    ig_xml = minidom.parse(requests.get(ig_authenticated_url).content)
-    self.indicator_ids = ig_xml.getElementsByTagName('indicator')
-
+    group_xml = minidom.parse(requests.get(authenticated_group_url).content)
+    self.element_type = (group_type == 'indicatorGroup') ? 'indicator' : 'dataElement'
+    self.element_ids = ig_xml.getElementsByTagName('elt_type')
+    
+  def constructElementUrl(element_id):
+    return self.full_login_url + '/api/' + self.element_type + '/' + element_id
+    
+  def getElementMetadata(element_id):
+    element_url = self.constructElementUrl(element_id)
+    return minidom.parse(requests.get(element_url).content)
     
 
 if __name__ == '__main__':
@@ -224,9 +233,9 @@ if __name__ == '__main__':
   parser.add_argument('--country', default='Senegal',
                       help='Which country\'s DHIS2 system are we scraping')
   parser.add_argument('--output', default='testoutput.csv', help='Output file')
-  parser.add_argument('--indicator_group', default='',
+  parser.add_argument('--group_id', default='',
                       help='Specific indicatorGroup / dataElementGroup of interest')
   args = parser.parse_args()
   
-  dhis_parser = dhisParser(args.country, args.indicator_group)
+  dhis_parser = dhisParser(args.country, args.group_id)
 
