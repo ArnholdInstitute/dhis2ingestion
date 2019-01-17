@@ -202,6 +202,7 @@ class dhisParser():
   def __init__(self, country, indicator_group):
     self.country = country
     self.full_login_url, self.display_url = constructDhisUrls(country)
+    self.indicator_group = indicator_group
     
     ig_metadata_url = self.full_login_url + '/api/identifiableObjects/' + indicator_group
     r = requests.get(ig_metadata_url)
@@ -213,7 +214,8 @@ class dhisParser():
     
     # This contains the parsed XML DOM of the indicator group, from which we can
     # retrieve a list of indicator ids.
-    self.indicator_group = minidom.parse(requests.get(ig_authenticated_url).content)
+    ig_xml = minidom.parse(requests.get(ig_authenticated_url).content)
+    self.indicator_ids = ig_xml.getElementsByTagName('indicator')
 
     
 
