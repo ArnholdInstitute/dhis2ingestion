@@ -35,53 +35,58 @@ def parse(filename):
 
 
 # prints the input indicator's displayName; currently expects a file as input.
-def getIndicatorNames(parsedFile):
-	indicators = parsedFile.getElementsByTagName('displayName')
+def getElementNames(elementXml):
+	elements = parsedFile.getElementsByTagName('displayName')
 
-	for elem in indicators:
+	for elem in elements:
 		d_name = elem.firstChild.data
 		#print d_name
 		
 	return d_name 
 	
+fieldnames = [
+  'Indicator name',
+  'Numerator description',
+  'Denominator description',
+  'Calculation',
+  'Definition validation',
+  'Data validation',
+  'Comments'
+]
 
-def getDescription(indicatorId):
+def getDescription(indicatorId, indicatorXml):
 	# create dictionary of values to write into csv file
-	fieldnames = ['Indicator name', 'Numerator description', 'Denominator description', 'Calculation', 'Definition validation', 'Data validation', 'Comments' ]
-	values = {key: '' for key in fieldnames}
-	print(values)
-
-	# navigate to the indicator url
-	parsedFile = minidom.parse(indicatorId + '.xml')
+	values = { key: '' for key in fieldnames }
+#	print(values)
 	
 	# store display name
-	displayName = parsedFile.getElementsByTagName('displayName')
+	displayName = indicatorXml.getElementsByTagName('displayName')
 	dNameValue = displayName[0].firstChild.data
 	values['Indicator name'] = constructHyperLink('indicators', indicatorId, dNameValue)
 
 	# store the numerator description
-	numDesc = parsedFile.getElementsByTagName('numeratorDescription')
+	numDesc = indicatorXml.getElementsByTagName('numeratorDescription')
 	numDescValue = numDesc[0].firstChild.data
 	values['Numerator description'] = numDescValue
 
 	# store the denominator description
-	denDesc = parsedFile.getElementsByTagName('denominatorDescription')
+	denDesc = indicatorXml.getElementsByTagName('denominatorDescription')
 	denDescValue = denDesc[0].firstChild.data
 	values['Denominator description'] = denDescValue
 
 	# get the numerator ids - currently with ids instead of friendly name(temporarily opening the direct file)
-	numerator = parsedFile.getElementsByTagName('numerator')
+	numerator = indicatorXml.getElementsByTagName('numerator')
 	numDescription = numerator[0].firstChild.data
-	print(numDescription)
+#	print(numDescription)
 
 
 	# get the denominator ids - currently with ids instead of friendly name
-	denominator = parsedFile.getElementsByTagName('denominator')
+	denominator = indicatorXml.getElementsByTagName('denominator')
 	denDescription = denominator[0].firstChild.data
-	print(denDescription)
+#	print(denDescription)
 
 
-	# convert the numerator and denominator dataElement id's with their descriptions
+	# convert the numerator and denominator dataElement ids with their descriptions
 	# 	all possible elements: #{xxxxxx}, sometimes #{xxxxx}.xxxxx, operators (+,-,*), and numbers (int)
 	#   create a list of id's, navigate to their url, and replace the num/den id's with the descriptions
 
@@ -110,12 +115,11 @@ def getDescription(indicatorId):
 			# separate out the category option combos, if any (index 0 will be the isolated indicator id, index 1 will be the category option combo)
 			a_id = re.findall('[^.]+', ids)
 
-			combo_name = getIndicatorNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
+			combo_name = getElementNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
 			#print(combo_name)
 
-			delem_name = getIndicatorNames(minidom.parse(a_id[0] + '.xml'))
+			delem_name = getElementNames(minidom.parse(a_id[0] + '.xml'))
 			
-
 			#print(ids + ': ' + delem_name)
 			values['Calculation'] += delem_name + combo_name + (numOps.pop(0) if numOps else ' ')
 
@@ -129,9 +133,9 @@ def getDescription(indicatorId):
 		else:
 			#navigate to url of the dataElement using the id; be sure to separate out the category option combos, if any
 			a_id = re.findall('[^.]+', ids)
-			combo_name = getIndicatorNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
+			combo_name = getElementNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
 
-			delem_name = getIndicatorNames(minidom.parse(a_id[0] + '.xml'))
+			delem_name = getElementNames(minidom.parse(a_id[0] + '.xml'))
 			
 
 			# TODO: construct url from the ids and write the hyperlink into the csv (easy)
@@ -170,28 +174,16 @@ def constructUrl(display_url, lvl, iid, friendlyName):
 # This returns a pair [full_login_url, display_url]; the former has username/
 # password inherent in it and is never put into output.
 def constructDhisUrls(country):
-  if country not in dhis_params_dict:
-    dhis_params_file = os.environ['DHIS2_PARAMS_FILE']
-    with open(dhis_params_file, 'r') as ofh:
-      dhis_params_dict = json.load(ofh)
+  dhis_params_dict = {}
+  dhis_params_file = os.environ['DHIS2_PARAMS_FILE']
+  with open(dhis_params_file, 'r') as ofh:
+    dhis_params_dict = json.load(ofh)
 
   return ['https://' + dhis_params_dict[country]['username'] + ':' +
             dhis_params_dict[country]['password'] + '@' +
             dhis_params_dict[country]['baseUrl'],
           'https://' + dhis_params_dict[country]['baseUrl']]
-         
-# with requests.Session() as s:
-# 	p = s.post(login_url, data=payload)
-# 	print p.text
 
-# 	r = s.get('https://senegal.dhis2.org/dhis/api/indicators/iCA0KZXvXuZ')
-# 	print r.text
-# 	#navigate('indicators', 'iCA0KZXvXuZ', s)
-
-#parse('malariaindicators.xml')
-#getDescription('TdWw71NnOoQ')
-#getDescription('gQvoDVLOyh1')
-#navigate('indicators', 'iCA0KZXvXuZ')
 
 class dhisParser():
   """ A class to parse DHIS2 system metadata
@@ -209,7 +201,7 @@ class dhisParser():
     r = requests.get(group_metadata_url)
     parsed_metadata = minidom.parse(r.content)
 
-    group_url = parsedFile.getElementsByTagName('identifiableObject').get('href')
+    group_url = parsed_metadata.getElementsByTagName('identifiableObject').get('href')
     group_type = group_url.split('/')[-2]
     authenticated_group_url = self.full_login_url + '/api' + group_type + '/' +\
                               self.group
@@ -219,6 +211,7 @@ class dhisParser():
     group_xml = minidom.parse(requests.get(authenticated_group_url).content)
     self.element_type = (group_type == 'indicatorGroup') ? 'indicator' : 'dataElement'
     self.element_ids = group_xml.getElementsByTagName('elt_type')
+    self.element_names = {}
     
   def constructElementUrl(element_id):
     return self.full_login_url + '/api/' + self.element_type + '/' + element_id
@@ -226,6 +219,29 @@ class dhisParser():
   def getElementMetadata(element_id):
     element_url = self.constructElementUrl(element_id)
     return minidom.parse(requests.get(element_url).content)
+
+  def getUnknownTypeMetadata(element_id):
+    url = self.full_login_url + '/api/identifiableObjects/' + element_id
+    idobj_metadata = minidom.parse(requests.get(url).content)
+    md_url = idobj_metadata.getElementsByTagName('identifiableObject').get('href')
+    
+    return minidom.parse(requests.get(md_url).content)
+    
+  # prints the input indicator's displayName; currently expects a file as input.
+  def getElementName(element_id):
+    if element_id in self.element_names:
+      return element_names[element_id]
+
+    elementXml = (element_id in self.element_ids) ?
+      getElementMetadata(element_id) : getUnknownTypeMetadata(element_id);
+    elements = elementXml.getElementsByTagName('displayName')
+
+    for elem in elements:
+      d_name = elem.firstChild.data
+      
+    element_names[element_id] = d_name
+		
+    return d_name 
     
 
 if __name__ == '__main__':
