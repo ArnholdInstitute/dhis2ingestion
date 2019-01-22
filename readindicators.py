@@ -76,7 +76,7 @@ class dhisParser():
     # This contains the parsed XML DOM of the indicator group, from which we can
     # retrieve a list of indicator ids.
     group_xml = minidom.parse(requests.get(authenticated_group_url).content)
-    self.element_type = (group_type == 'indicatorGroup') ? 'indicators' : 'dataElements'
+    self.element_type = 'indicators' if (group_type == 'indicatorGroup') else 'dataElements'
     self.element_ids = group_xml.getElementsByTagName(self.element_type)
     self.element_names = {}
     self.values = {}
@@ -99,9 +99,9 @@ class dhisParser():
     if element_id in self.element_names:
       return self.element_names[element_id]
 
-    elementXml = (element_id in self.element_ids) ?
-      getKnownTypeMetadata(element_id, self.element_type) :
-      getUnknownTypeMetadata(element_id);
+    elementXml = getKnownTypeMetadata(element_id, self.element_type)
+      if element_id in self.element_ids
+      else getUnknownTypeMetadata(element_id);
     elements = elementXml.getElementsByTagName('displayName')
 
     for elem in elements:
