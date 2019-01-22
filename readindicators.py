@@ -113,33 +113,33 @@ class dhisParser():
     self.element_names[element_id] = d_name
     return d_name 
 
-  def getIndicatorDescription(indicatorId):
-    indicatorXml = self.getKnownTypeMetadata(indicatorId, 'indicators');
+  def getIndicatorDescription(indicator_id):
+    indicator_xml = self.getKnownTypeMetadata(indicator_id, 'indicators');
   
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
 	
     # store display name
-    displayName = indicatorXml.getElementsByTagName('displayName')
+    displayName = indicator_xml.getElementsByTagName('displayName')
     dNameValue = displayName[0].firstChild.data
     values['Indicator name'] = constructHyperLink('indicators', indicatorId, dNameValue)
 
     # store the numerator description
-    numDesc = indicatorXml.getElementsByTagName('numeratorDescription')
+    numDesc = indicator_xml.getElementsByTagName('numeratorDescription')
     numDescValue = numDesc[0].firstChild.data
     values['Numerator description'] = numDescValue
 
     # store the denominator description
-    denDesc = indicatorXml.getElementsByTagName('denominatorDescription')
+    denDesc = indicator_xml.getElementsByTagName('denominatorDescription')
     denDescValue = denDesc[0].firstChild.data
     values['Denominator description'] = denDescValue
 
     # get the numerator ids - currently with ids instead of friendly name(temporarily opening the direct file)
-    numerator = indicatorXml.getElementsByTagName('numerator')
+    numerator = indicator_xml.getElementsByTagName('numerator')
     numDescription = numerator[0].firstChild.data
 
     # get the denominator ids - currently with ids instead of friendly name
-    denominator = indicatorXml.getElementsByTagName('denominator')
+    denominator = indicator_xml.getElementsByTagName('denominator')
     denDescription = denominator[0].firstChild.data
 
     # convert the numerator and denominator dataElement ids with their descriptions
@@ -172,7 +172,17 @@ class dhisParser():
             values['Calculation'] += ' ' + self.getElementName(elements.group(2))  
     values['Calculation'] += ' )'
     
-    self.values[element_id] = values
+    return values
+    
+  def outputAllIndicators():
+    if self.element_type != 'indicators':
+      return []
+      
+    output_values = []
+    for indicator_id in self.element_ids:
+      output_values.append(self.getIndicatorDescription(indicator_id))
+      
+    return output_values
 
 
 if __name__ == '__main__':
@@ -185,4 +195,7 @@ if __name__ == '__main__':
   args = parser.parse_args()
   
   dhis_parser = dhisParser(args.country, args.group_id)
+  
+  output_values = dhis_parser.outputAllIndicators()
+
 
