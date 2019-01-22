@@ -17,9 +17,6 @@ import json
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
-dhis_params_dict = {}
-
-	
 fieldnames = [
   'Indicator name',
   'Numerator description',
