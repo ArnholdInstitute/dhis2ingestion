@@ -18,31 +18,7 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 dhis_params_dict = {}
-#dhis_url = 'senegal.dhis2.org/dhis'
 
-# prints all indicators in the malaria indicator group; 
-# higher level function that retrieves the numerator and denominator of
-# all indicators in the group.
-def parse(filename):
-	parsedFile = minidom.parse(filename)
-	getIndicatorNames(parsedFile)
-
-	ids = parsedFile.getElementsByTagName('indicator')
-	for elem in ids:
-		indicatorId = elem.attributes['id'].value
-		#getDescription(indicatorId)
-		print(indicatorId)
-
-
-# prints the input indicator's displayName; currently expects a file as input.
-def getElementNames(elementXml):
-	elements = parsedFile.getElementsByTagName('displayName')
-
-	for elem in elements:
-		d_name = elem.firstChild.data
-		#print d_name
-		
-	return d_name 
 	
 fieldnames = [
   'Indicator name',
@@ -53,116 +29,10 @@ fieldnames = [
   'Data validation',
   'Comments'
 ]
-
-def getDescription(indicatorId, indicatorXml):
-	# create dictionary of values to write into csv file
-	values = { key: '' for key in fieldnames }
-#	print(values)
-	
-	# store display name
-	displayName = indicatorXml.getElementsByTagName('displayName')
-	dNameValue = displayName[0].firstChild.data
-	values['Indicator name'] = constructHyperLink('indicators', indicatorId, dNameValue)
-
-	# store the numerator description
-	numDesc = indicatorXml.getElementsByTagName('numeratorDescription')
-	numDescValue = numDesc[0].firstChild.data
-	values['Numerator description'] = numDescValue
-
-	# store the denominator description
-	denDesc = indicatorXml.getElementsByTagName('denominatorDescription')
-	denDescValue = denDesc[0].firstChild.data
-	values['Denominator description'] = denDescValue
-
-	# get the numerator ids - currently with ids instead of friendly name(temporarily opening the direct file)
-	numerator = indicatorXml.getElementsByTagName('numerator')
-	numDescription = numerator[0].firstChild.data
-#	print(numDescription)
-
-
-	# get the denominator ids - currently with ids instead of friendly name
-	denominator = indicatorXml.getElementsByTagName('denominator')
-	denDescription = denominator[0].firstChild.data
-#	print(denDescription)
-
-
-	# convert the numerator and denominator dataElement ids with their descriptions
-	# 	all possible elements: #{xxxxxx}, sometimes #{xxxxx}.xxxxx, operators (+,-,*), and numbers (int)
-	#   create a list of id's, navigate to their url, and replace the num/den id's with the descriptions
-
-	# TODO memoization - as you find ids, add them to a global mapping b/t id and description; 
-	# TODO look for operators so that you can display the calculation
-	numIds = re.findall('[^#{ }+/\-*()]+', numDescription)
-	denIds = re.findall('[^#{ }+/\-*()]+', denDescription)
-	#print(numIds)
-
-	# find all operators so that you can reconstruct the 'calculation' column 
-	numOps = re.findall('[\+\-\*\/]', numDescription)
-	denOps = re.findall('[\+\-\*\/]', denDescription)
-
-
-	# iterate through numIds and denIds (the matched dataElement ids or digits)
-	# and find the friendly name of the id and add it to the dictionary along
-	# with the next operator (+,-,*) in the list of matched operators.
-	for ids in numIds:
-		# if it's a number, then insert it straight into 'calculation'
-		if (ids.isdigit()):
-			#print (ids)
-			values['Calculation'] += ids + (numOps.pop(0) if numOps else ' ')
-		else:
-			#navigate to url of the dataElement using the id 
-
-			# separate out the category option combos, if any (index 0 will be the isolated indicator id, index 1 will be the category option combo)
-			a_id = re.findall('[^.]+', ids)
-
-			combo_name = getElementNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
-			#print(combo_name)
-
-			delem_name = getElementNames(minidom.parse(a_id[0] + '.xml'))
-			
-			#print(ids + ': ' + delem_name)
-			values['Calculation'] += delem_name + combo_name + (numOps.pop(0) if numOps else ' ')
-
-	values['Calculation'] += '/'
-
-	for ids in denIds:
-		# if it's a number, then print it
-		if (ids.isdigit()):
-			#print (ids)
-			values['Calculation'] += ids + (denOps.pop(0) if denOps else ' ')
-		else:
-			#navigate to url of the dataElement using the id; be sure to separate out the category option combos, if any
-			a_id = re.findall('[^.]+', ids)
-			combo_name = getElementNames(minidom.parse(a_id[1] + '.xml')) if len(a_id) > 1 else ''
-
-			delem_name = getElementNames(minidom.parse(a_id[0] + '.xml'))
-			
-
-			# TODO: construct url from the ids and write the hyperlink into the csv (easy)
-			#print(ids + ': ' + delem_name)
-			values['Calculation'] += delem_name + combo_name + (denOps.pop(0) if denOps else ' ')
-
-	# open csv file and declare column names
-	with open('testoutput.csv', mode='w') as csv_file:
-
-		writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-		writer.writeheader()
-		# encode the values in utf-8 before writing the rows to csv.
-		for key, value in values.items():
-			values[key] = value.encode('utf-8')
-		writer.writerow(values)
-
-
-# currently I am redirected to the login page for DHIS2 - want to look up how to log in w/ credentials then navigate to the proper url
-def navigate(full_login_url, lvl, iid, session):
-  navigate_url = 'https://' + full_login_url + '/api/' + lvl + '/' + iid
-  r = requests.get(navigate_url)
-	return r.content
-
-
-# constructs the url the given data - inputs are the level and the id
-def constructUrl(display_url, lvl, iid, friendlyName):
-	output_url = 'https://' + display_url + '/api/' + lvl + '/' + iid
+    
+# constructs the url the given data - inputs are the element type, id, and name.
+def constructDisplayUrl(base_url, element_type, element_id, friendlyName):
+	output_url = 'https://' + base_url + '/api/' + element_type + '/' + element_id
 	return '=HYPERLINK(\"' + output_url + '\",' + '\"' + friendlyName + '\")'
   
 
@@ -209,16 +79,13 @@ class dhisParser():
     # This contains the parsed XML DOM of the indicator group, from which we can
     # retrieve a list of indicator ids.
     group_xml = minidom.parse(requests.get(authenticated_group_url).content)
-    self.element_type = (group_type == 'indicatorGroup') ? 'indicator' : 'dataElement'
-    self.element_ids = group_xml.getElementsByTagName('elt_type')
+    self.element_type = (group_type == 'indicatorGroup') ? 'indicators' : 'dataElements'
+    self.element_ids = group_xml.getElementsByTagName(self.element_type)
     self.element_names = {}
+    self.values = {}
     
   def constructElementUrl(element_id):
     return self.full_login_url + '/api/' + self.element_type + '/' + element_id
-    
-  def getElementMetadata(element_id):
-    element_url = self.constructElementUrl(element_id)
-    return minidom.parse(requests.get(element_url).content)
 
   def getUnknownTypeMetadata(element_id):
     url = self.full_login_url + '/api/identifiableObjects/' + element_id
@@ -227,22 +94,86 @@ class dhisParser():
     
     return minidom.parse(requests.get(md_url).content)
     
-  # prints the input indicator's displayName; currently expects a file as input.
+  def getKnownTypeMetadata(element_id, element_type):
+    url = self.full_login_url + '/api/' + element_type + '/' + element_id   
+    return minidom.parse(requests.get(url).content)
+
   def getElementName(element_id):
     if element_id in self.element_names:
-      return element_names[element_id]
+      return self.element_names[element_id]
 
     elementXml = (element_id in self.element_ids) ?
-      getElementMetadata(element_id) : getUnknownTypeMetadata(element_id);
+      getKnownTypeMetadata(element_id, self.element_type) :
+      getUnknownTypeMetadata(element_id);
     elements = elementXml.getElementsByTagName('displayName')
 
     for elem in elements:
       d_name = elem.firstChild.data
       
-    element_names[element_id] = d_name
-		
+    self.element_names[element_id] = d_name
     return d_name 
+
+  def getIndicatorDescription(indicatorId):
+    indicatorXml = self.getKnownTypeMetadata(indicatorId, 'indicators');
+  
+    # create dictionary of values to write into csv file
+    values = { key: '' for key in fieldnames }
+	
+    # store display name
+    displayName = indicatorXml.getElementsByTagName('displayName')
+    dNameValue = displayName[0].firstChild.data
+    values['Indicator name'] = constructHyperLink('indicators', indicatorId, dNameValue)
+
+    # store the numerator description
+    numDesc = indicatorXml.getElementsByTagName('numeratorDescription')
+    numDescValue = numDesc[0].firstChild.data
+    values['Numerator description'] = numDescValue
+
+    # store the denominator description
+    denDesc = indicatorXml.getElementsByTagName('denominatorDescription')
+    denDescValue = denDesc[0].firstChild.data
+    values['Denominator description'] = denDescValue
+
+    # get the numerator ids - currently with ids instead of friendly name(temporarily opening the direct file)
+    numerator = indicatorXml.getElementsByTagName('numerator')
+    numDescription = numerator[0].firstChild.data
+
+    # get the denominator ids - currently with ids instead of friendly name
+    denominator = indicatorXml.getElementsByTagName('denominator')
+    denDescription = denominator[0].firstChild.data
+
+    # convert the numerator and denominator dataElement ids with their descriptions
+    # 	all possible elements: #{xxxxxx}, sometimes #{xxxxx.xxxxx}, operators (+,-,*), and numbers (int)
+    #   create a list of id's, navigate to their url, and replace the num/den id's with the descriptions
+    parsedNumDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)', numDescription)
+    parsedDenDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)', denDescription)
+
+    # iterate through parsed descriptions; extract friendly names of elements
+    # and pass operators/numbers through as is.
+    values['Calculation'] = '('
+    for numItem in parsedNumDesc:
+      if numItem.group(0).isdigit() || re.match('[\+\-\/\*]', numItem.group(0)):
+        values['Calculation'] += ' ' + numItem.group(0)
+      else:
+        elements = re.match('#\{(\w*)\.?(\w*)\}', numItem.group(0))
+        if elements:
+          values['Calculation'] += ' ' + self.getElementName(elements.group(1))
+          if elements.group(2):
+            values['Calculation'] += ' ' + self.getElementName(elements.group(2))
+    values['Calculation'] += ' ) / ('
+    for denItem in parsedDenDesc:
+      if (denItem.group(0).isdigit() || re.match('[\+\-\/\*]', denItem.group(0))):
+        values['Calculation'] += ' ' + denItem.group(0)
+      else:
+        elements = re.match('#\{(\w*)\.?(\w*)\}', denItem.group(0))
+        if elements:
+          values['Calculation'] += ' ' + self.getElementName(elements.group(1))
+          if elements.group(2):
+            values['Calculation'] += ' ' + self.getElementName(elements.group(2))  
+    values['Calculation'] += ' )'
     
+    self.values[element_id] = values
+
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
