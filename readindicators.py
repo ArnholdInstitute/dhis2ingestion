@@ -198,4 +198,12 @@ if __name__ == '__main__':
   
   output_values = dhis_parser.outputAllIndicators()
 
+  with open(args.output, 'w') as ofh:
+    ofh.write(fieldnames.join(','))
+    for value in output_values:
+      line = ''
+      for field in fieldnames:
+        line += (value[field] || '') + ','
+      ofh.write(line[:-1])
+
 
