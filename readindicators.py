@@ -9,13 +9,9 @@ import argparse
 import getpass
 import os
 import re
-import urllib2
 import csv
 import requests
 import json
-
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
 
 fieldnames = [
   'Indicator name',
@@ -99,9 +95,9 @@ class dhisParser():
     if element_id in self.element_names:
       return self.element_names[element_id]
 
-    elementXml = getKnownTypeMetadata(element_id, self.element_type)
-      if element_id in self.element_ids
-      else getUnknownTypeMetadata(element_id);
+    elementXml = getKnownTypeMetadata(element_id, self.element_type) \
+      if element_id in self.element_ids \
+      else getUnknownTypeMetadata(element_id)
     elements = elementXml.getElementsByTagName('displayName')
 
     for elem in elements:
@@ -149,7 +145,7 @@ class dhisParser():
     # and pass operators/numbers through as is.
     values['Calculation'] = '('
     for numItem in parsedNumDesc:
-      if numItem.group(0).isdigit() || re.match('[\+\-\/\*]', numItem.group(0)):
+      if numItem.group(0).isdigit() or re.match('[\+\-\/\*]', numItem.group(0)):
         values['Calculation'] += ' ' + numItem.group(0)
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', numItem.group(0))
@@ -159,7 +155,7 @@ class dhisParser():
             values['Calculation'] += ' ' + self.getElementName(elements.group(2))
     values['Calculation'] += ' ) / ('
     for denItem in parsedDenDesc:
-      if (denItem.group(0).isdigit() || re.match('[\+\-\/\*]', denItem.group(0))):
+      if (denItem.group(0).isdigit() or re.match('[\+\-\/\*]', denItem.group(0))):
         values['Calculation'] += ' ' + denItem.group(0)
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', denItem.group(0))
@@ -200,7 +196,7 @@ if __name__ == '__main__':
     for value in output_values:
       line = ''
       for field in fieldnames:
-        line += (value[field] || '') + ','
+        line += (value[field] or '') + ','
       ofh.write(line[:-1])
 
 
