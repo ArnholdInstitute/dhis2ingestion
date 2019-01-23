@@ -1,17 +1,17 @@
 """
-This program is designed to scrape metadata from a DHIS2 system and output it in human-readable format.
-It expects there to be a JSON file containing base URL, username and password information, with
-the location of the file stored in a .env variable.
+This program is designed to scrape metadata from a DHIS2 system and output it
+in human-readable format. It expects there to be a JSON file containing base
+URL, username and password information, with the location of the file stored
+in a .env variable.
 """
 
-from xml.dom import minidom
 import argparse
-import getpass
 import os
 import re
-import csv
 import requests
 import json
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
 fieldnames = [
   'Indicator name',
@@ -62,118 +62,121 @@ class dhisParser():
     group_metadata_url = self.full_login_url + '/api/identifiableObjects/' +\
                          self.group
     r = requests.get(group_metadata_url)
-    parsed_metadata = minidom.parse(r.content)
+    parsed_metadata = json.loads(r.text)
 
-    group_url = parsed_metadata.getElementsByTagName('identifiableObject').get('href')
-    group_type = group_url.split('/')[-2]
-    authenticated_group_url = self.full_login_url + '/api' + group_type + '/' +\
-                              self.group
+    group_type = parsed_metadata['href'].split('/')[-2]
+    authenticated_group_url = self.full_login_url + '/api/' + group_type + \
+                              '/' + self.group
     
-    # This contains the parsed XML DOM of the indicator group, from which we can
-    # retrieve a list of indicator ids.
-    group_xml = minidom.parse(requests.get(authenticated_group_url).content)
-    self.element_type = 'indicators' if (group_type == 'indicatorGroup') else 'dataElements'
-    self.element_ids = group_xml.getElementsByTagName(self.element_type)
+    # This contains the parsed XML DOM of the indicator group, from which we
+    # can retrieve a list of indicator ids.
+    group_desc = json.loads(requests.get(authenticated_group_url).text)
+
+    self.element_type = ('indicators'
+      if (group_type == 'indicatorGroups') else 'dataElements')
+    self.element_ids = list(map(lambda x: x['id'],
+                                group_desc[self.element_type]))
     self.element_names = {}
     self.values = {}
     
-  def constructElementUrl(element_id):
+  def constructElementUrl(self, element_id):
     return self.full_login_url + '/api/' + self.element_type + '/' + element_id
 
-  def getUnknownTypeMetadata(element_id):
+  def getUnknownTypeMetadata(self, element_id):
     url = self.full_login_url + '/api/identifiableObjects/' + element_id
-    idobj_metadata = minidom.parse(requests.get(url).content)
-    md_url = idobj_metadata.getElementsByTagName('identifiableObject').get('href')
+    idobj_metadata = json.loads(requests.get(url).text)
+    elt_type = idobj_metadata['href'].split('/')[-2]
+    md_url = self.full_login_url + '/api/' + elt_type + '/' + element_id
     
-    return minidom.parse(requests.get(md_url).content)
+    return json.loads(requests.get(md_url).text)
     
-  def getKnownTypeMetadata(element_id, element_type):
+  def getKnownTypeMetadata(self, element_id, element_type):
     url = self.full_login_url + '/api/' + element_type + '/' + element_id   
-    return minidom.parse(requests.get(url).content)
+    return json.loads(requests.get(url).text)
 
-  def getElementName(element_id):
+  def getElementName(self, element_id):
     if element_id in self.element_names:
       return self.element_names[element_id]
 
-    elementXml = getKnownTypeMetadata(element_id, self.element_type) \
+    element_json = self.getKnownTypeMetadata(element_id, self.element_type) \
       if element_id in self.element_ids \
-      else getUnknownTypeMetadata(element_id)
-    elements = elementXml.getElementsByTagName('displayName')
-
-    for elem in elements:
-      d_name = elem.firstChild.data
-      
+      else self.getUnknownTypeMetadata(element_id)
+    d_name = element_json['displayName']     
     self.element_names[element_id] = d_name
     return d_name 
 
-  def getIndicatorDescription(indicator_id):
-    indicator_xml = self.getKnownTypeMetadata(indicator_id, 'indicators');
+  def getIndicatorDescription(self, indicator_id):
+    indicator_json = self.getKnownTypeMetadata(indicator_id, 'indicators');
   
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
 	
     # store display name
-    displayName = indicator_xml.getElementsByTagName('displayName')
-    dNameValue = displayName[0].firstChild.data
-    values['Indicator name'] = constructHyperLink('indicators', indicatorId, dNameValue)
+    displayName = indicator_json['displayName']
+    values['Indicator name'] = constructDisplayUrl(self.display_url,
+                                                   'indicators',
+                                                   indicator_id,
+                                                   displayName)
 
     # store the numerator description
-    numDesc = indicator_xml.getElementsByTagName('numeratorDescription')
-    numDescValue = numDesc[0].firstChild.data
-    values['Numerator description'] = numDescValue
+    values['Numerator description'] = indicator_json['numeratorDescription']
 
     # store the denominator description
-    denDesc = indicator_xml.getElementsByTagName('denominatorDescription')
-    denDescValue = denDesc[0].firstChild.data
-    values['Denominator description'] = denDescValue
+    values['Denominator description'] = indicator_json['denominatorDescription']
 
-    # get the numerator ids - currently with ids instead of friendly name(temporarily opening the direct file)
-    numerator = indicator_xml.getElementsByTagName('numerator')
-    numDescription = numerator[0].firstChild.data
+    # get the numerator formula
+    numerator = indicator_json['numerator']
 
-    # get the denominator ids - currently with ids instead of friendly name
-    denominator = indicator_xml.getElementsByTagName('denominator')
-    denDescription = denominator[0].firstChild.data
+    # get the denominator formula
+    denominator = indicator_json['denominator']
 
-    # convert the numerator and denominator dataElement ids with their descriptions
-    # 	all possible elements: #{xxxxxx}, sometimes #{xxxxx.xxxxx}, operators (+,-,*), and numbers (int)
-    #   create a list of id's, navigate to their url, and replace the num/den id's with the descriptions
-    parsedNumDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)', numDescription)
-    parsedDenDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)', denDescription)
+    # parse the numerator and denominator dataElement formulas to English
+    # 	all possible elements: #{xxxxxx}, sometimes #{xxxxx.xxxxx}, 
+    #   operators (+,-,*), and numbers (int).
+    #   create a list of id's, navigate to their url, and replace the num/den
+    #   id's with the descriptions
+    parsedNumDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
+                                numerator)
+    parsedDenDesc = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
+                                denominator)
 
     # iterate through parsed descriptions; extract friendly names of elements
     # and pass operators/numbers through as is.
     values['Calculation'] = '('
     for numItem in parsedNumDesc:
-      if numItem.group(0).isdigit() or re.match('[\+\-\/\*]', numItem.group(0)):
+      if (numItem.group(0).isdigit() or
+          re.match('[\+\-\/\*]', numItem.group(0))):
         values['Calculation'] += ' ' + numItem.group(0)
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', numItem.group(0))
         if elements:
           values['Calculation'] += ' ' + self.getElementName(elements.group(1))
           if elements.group(2):
-            values['Calculation'] += ' ' + self.getElementName(elements.group(2))
+            values['Calculation'] += ' ' +\
+              self.getElementName(elements.group(2))
     values['Calculation'] += ' ) / ('
     for denItem in parsedDenDesc:
-      if (denItem.group(0).isdigit() or re.match('[\+\-\/\*]', denItem.group(0))):
+      if (denItem.group(0).isdigit() or
+          re.match('[\+\-\/\*]', denItem.group(0))):
         values['Calculation'] += ' ' + denItem.group(0)
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', denItem.group(0))
         if elements:
           values['Calculation'] += ' ' + self.getElementName(elements.group(1))
           if elements.group(2):
-            values['Calculation'] += ' ' + self.getElementName(elements.group(2))  
+            values['Calculation'] += ' ' +\
+              self.getElementName(elements.group(2))  
     values['Calculation'] += ' )'
-    
+
     return values
     
-  def outputAllIndicators():
+  def outputAllIndicators(self):
     if self.element_type != 'indicators':
       return []
       
     output_values = []
     for indicator_id in self.element_ids:
-      output_values.append(self.getIndicatorDescription(indicator_id))
+      output_values.append(self.getIndicatorDescription(indicator_id).copy())
       
     return output_values
 
