@@ -31,11 +31,18 @@ validation_errcodes = {
   8: 'invalid id -- field is missing metadata',
   16: 'bad id -- field is not in registry'
 }
+
+def translateErrCode(input_errcode):
+  outputs = []
+  for errcode, error in validation_errcodes:
+    if (errcode & input_errcode):
+      outputs.append(error)
+  return ' & '.join(outputs) | 'valid'
     
 # constructs the url the given data - inputs are the element type, id, and name.
 def constructDisplayUrl(base_url, element_type, element_id, friendlyName):
-	output_url = 'https://' + base_url + '/api/' + element_type + '/' + element_id
-	return '=HYPERLINK(\"' + output_url + '\",' + '\"' + friendlyName + '\")'
+	output_url = base_url + '/api/' + element_type + '/' + element_id
+	return '=HYPERLINK(\"' + output_url + '\";\"' + friendlyName + '\")'
   
 
 # We expect dhis_params_dict to be a dictionary keyed by country; we expect
@@ -137,8 +144,10 @@ class dhisParser():
     if not indicator_json:
       values['Definition validation code'] = 8
       values['Validation comments'] = 'Indicator ' + indicator_id +\
-                                      ' not found - has no registry entry. '
+                                      ' not found - has no registry entry.'
       return values
+
+    values['Validation comments'] = []
 
     # store display name
     displayName = '??????'
@@ -146,8 +155,8 @@ class dhisParser():
       displayName = indicator_json['displayName']
     else:
       values['Definition validation code'] = 4
-      values['Validation comments'] = 'Indicator ' + indicator_id +\
-                                      ' has no display name. '
+      values['Validation comments'].append('Indicator ' + indicator_id +\
+                                           ' has no display name.')
 
     values['Indicator name'] = constructDisplayUrl(self.display_url,
                                                    'indicators',
@@ -160,17 +169,18 @@ class dhisParser():
       values['Numerator description'] = indicator_json['numeratorDescription']
     else:
       values['Definition validation code'] = 4
-      values['Validation comments'] += 'No description of the numerator. '
+      values['Validation comments'].append('No description of the numerator.')
 
     # store the denominator description
     values['Denominator description'] = '1'
-    if 'denominatorDescription' in indicator_json:
+    if ('denominatorDescription' in indicator_json and 
+        indicator_json['denominatorDescription'] != ''):
       values['Denominator description'] =\
         indicator_json['denominatorDescription']
     else:
       values['Definition validation code'] = 4
-      values['Validation comments'] += 'No description of the denominator; \
-                                        we assume it is 1. '
+      values['Validation comments'].append(
+        'No description of the denominator; we assume it is 1.')
 
     # get the numerator formula
     numerator = '??????'
@@ -178,7 +188,7 @@ class dhisParser():
       numerator = indicator_json['numerator']
     else:
       values['Definition validation code'] |= 2
-      values['Validation comments'] += 'Numerator has no formula. '
+      values['Validation comments'].append('Numerator has no formula.')
 
     # get the denominator formula
     denominator = '??????'
@@ -186,11 +196,11 @@ class dhisParser():
       denominator = indicator_json['denominator']
     else:
       values['Definition validation code'] |= 2
-      values['Validation comments'] += 'Denominator has no formula. '
+      values['Validation comments'].append('Denominator has no formula.')
     if (denominator == '1') ^ (values['Denominator description'] == '1'):
       values['Definition validation code'] |= 1
-      values['Validation comments'] += 'Denominator formula does not match \
-                                        description. '
+      values['Validation comments'].append(
+        'Denominator formula does not match description.')
 
     # parse the numerator and denominator dataElement formulas to English
     # 	all possible elements: #{xxxxxx}, sometimes #{xxxxx.xxxxx}, 
@@ -200,7 +210,7 @@ class dhisParser():
     parsed_num_form = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
                                   numerator)
     parsed_den_form = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
-                                denominator)
+                                  denominator)
 
     # iterate through parsed formulas; extract friendly names of elements
     # and pass operators/numbers through as is.
@@ -216,22 +226,21 @@ class dhisParser():
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
-            values['Validation comments'] += 'dataElement ' + elements.group(1)\
-              + ' in numerator formula is not well defined - ' 
-            values['Validation comments'] += ('has no registry entry. '\
-              if elt_vcode == 16 \
-              else 'has no valid metadata. ')
+            vcomment = 'dataElement ' + elements.group(1) +\
+              ' in numerator formula is not well defined - '
+            vcomment += ('has no registry entry.' if elt_vcode == 16 else \
+                         'has no valid metadata.')
+            values['Validation comments'].append(vcomment)
           if elements.group(2):
             coc_name, coc_vcode = self.getElementName(elements.group(2))
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
               values['Definition validation code'] |= 1 | coc_vcode
-              values['Validation comments'] += 'categoryOptionCombo ' +\
-                elements.group(2) +\
+              vcomment = 'categoryOptionCombo ' + elements.group(2) +\
                 ' in numerator formula is not well defined - '
-              values['Validation comments'] += ('has no registry entry. '\
-                if elt_vcode == 16 \
-                else 'has no valid metadata. ')                
+              vcomment += ('has no registry entry.' if elt_vcode == 16 else \
+                         'has no valid metadata.')
+              values['Validation comments'].append(vcomment)              
 
     values['Calculation'] += ' ) / ('
     for den_item in parsed_den_form:
@@ -245,25 +254,28 @@ class dhisParser():
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
-            values['Validation comments'] += 'dataElement ' + elements.group(1)\
-              + ' in denominator formula is not well defined - ' 
-            values['Validation comments'] += ('has no registry entry. '\
-              if elt_vcode == 16 \
-              else 'has no valid metadata. ')
+            vcomment = 'dataElement ' + elements.group(1) +\
+              ' in denominator formula is not well defined - '
+            vcomment += ('has no registry entry.' if elt_vcode == 16 else \
+                         'has no valid metadata.')
+            values['Validation comments'].append(vcomment)
           if elements.group(2):
             coc_name, coc_vcode = self.getElementName(elements.group(2))
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
-              values['Definition validation code'] |= 1 | coc_vcode
-              values['Validation comments'] += 'categoryOptionCombo ' +\
-                elements.group(2) +\
+              vcomment = 'categoryOptionCombo ' + elements.group(2) +\
                 ' in denominator formula is not well defined - '
-              values['Validation comments'] += ('has no registry entry. '\
-                if elt_vcode == 16 \
-                else 'has no valid metadata. ')
+              vcomment += ('has no registry entry.' if elt_vcode == 16 else \
+                         'has no valid metadata.')
+              values['Validation comments'].append(vcomment) 
 
     values['Calculation'] += ' )'
-
+    
+    values['Definition validation code'] = \
+      str(values['Definition validation code'])
+    values['Validation comments'] = '\"' + \
+      '\n'.join(values['Validation comments']) + '\"'
+    
     return values
     
   def outputAllIndicators(self):
@@ -295,7 +307,7 @@ if __name__ == '__main__':
     for value in output_values:
       line = ''
       for field in fieldnames:
-        line += (str(value[field]) or '') + ','
+        line += (value[field] or '') + ','
       ofh.write(line[:-1] + '\n')
 
 
