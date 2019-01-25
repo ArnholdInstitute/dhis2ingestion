@@ -214,7 +214,7 @@ class dhisParser():
 
     # iterate through parsed formulas; extract friendly names of elements
     # and pass operators/numbers through as is.
-    values['Calculation'] = '('
+    values['Calculation'] = '{'
     for num_item in parsed_num_form:
       if (num_item.group(0).isdigit() or
           re.match('[\+\-\/\*]', num_item.group(0))):
@@ -242,7 +242,7 @@ class dhisParser():
                          'has no valid metadata.')
               values['Validation comments'].append(vcomment)              
 
-    values['Calculation'] += ' ) / ('
+    values['Calculation'] += ' } / {'
     for den_item in parsed_den_form:
       if (den_item.group(0).isdigit() or
           re.match('[\+\-\/\*]', den_item.group(0))):
@@ -269,7 +269,7 @@ class dhisParser():
                          'has no valid metadata.')
               values['Validation comments'].append(vcomment) 
 
-    values['Calculation'] += ' )'
+    values['Calculation'] += ' }'
     
     values['Definition validation code'] = \
       str(values['Definition validation code'])
