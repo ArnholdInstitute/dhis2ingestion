@@ -143,8 +143,8 @@ class dhisParser():
 
     if not indicator_json:
       values['Definition validation code'] = 8
-      values['Validation comments'] = 'Indicator ' + indicator_id +\
-                                      ' not found - has no registry entry.'
+      values['Validation comments'] = \
+        'Indicator ' + indicator_id + ' not found - has no registry entry.'
       return values
 
     values['Validation comments'] = []
@@ -155,8 +155,22 @@ class dhisParser():
       displayName = indicator_json['displayName']
     else:
       values['Definition validation code'] = 4
-      values['Validation comments'].append('Indicator ' + indicator_id +\
-                                           ' has no display name.')
+      values['Validation comments'].append(
+        'Indicator ' + indicator_id + ' has no display name.'
+      )
+
+    indicator_number_match = re.search(
+      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      re.sub('\s', '', displayName)
+    )
+    indicator_number = None
+    if indicator_number_match:
+      indicator_number = int(
+        indicator_number_match.group(1) or
+        indicator_number_match.group(2) or
+        indicator_number_match.group(3) or
+        indicator_number_match.group(4)
+      )
 
     values['Indicator name'] = constructDisplayUrl(self.display_url,
                                                    'indicators',
@@ -171,6 +185,19 @@ class dhisParser():
       values['Definition validation code'] = 4
       values['Validation comments'].append('No description of the numerator.')
 
+    numerator_number_match = re.search(
+      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      values['Numerator description']
+    )
+    numerator_number = None
+    if numerator_number_match:
+      numerator_number = int(
+        numerator_number_match.group(1) or
+        numerator_number_match.group(2) or
+        numerator_number_match.group(3) or
+        numerator_number_match.group(4)
+      )
+      
     # store the denominator description
     values['Denominator description'] = '1'
     if ('denominatorDescription' in indicator_json and 
@@ -180,7 +207,32 @@ class dhisParser():
     else:
       values['Definition validation code'] = 4
       values['Validation comments'].append(
-        'No description of the denominator; we assume it is 1.')
+        'No description of the denominator; we assume it is 1.'
+      )
+        
+    denominator_number_match = re.search(
+      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      values['Denominator description']
+    )
+    denominator_number = None
+    denominator_number = None
+    if denominator_number_match:
+      denominator_number = int(
+        denominator_number_match.group(1) or
+        denominator_number_match.group(2) or
+        denominator_number_match.group(3) or
+        denominator_number_match.group(4)
+      )
+      if denominator_number == 1:
+        denominator_number = None
+
+    if (indicator_number and indicator_number != denominator_number and
+        indicator_number != numerator_number):
+      values['Definition validation code'] |= 1
+      values['Validation comments'].append(
+        'Indicator description has a number in it (' + str(indicator_number) +
+        ') which does not appear in numerator or denominator descriptions.'
+      )
 
     # get the numerator formula
     numerator = '??????'
@@ -214,11 +266,16 @@ class dhisParser():
 
     # iterate through parsed formulas; extract friendly names of elements
     # and pass operators/numbers through as is.
+    numerator_number_seen = (numerator_number is None)
+    denominator_number_seen = (denominator_number is None)
     values['Calculation'] = '{'
     for num_item in parsed_num_form:
       if (num_item.group(0).isdigit() or
           re.match('[\+\-\/\*]', num_item.group(0))):
         values['Calculation'] += ' ' + num_item.group(0)
+        if (num_item.group(0).isdigit() and
+            int(num_item.group(0)) == numerator_number):
+          numerator_number_seen = True
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', num_item.group(0))
         if elements:
@@ -242,11 +299,21 @@ class dhisParser():
                          'has no valid metadata.')
               values['Validation comments'].append(vcomment)              
 
+    if not numerator_number_seen:
+      values['Validation comments'].append(
+        'The numerator description contains a number (' +
+        str(numerator_number) +
+        ') which does not appear in the calculation of the numerator.'
+      )
+        
     values['Calculation'] += ' } / {'
     for den_item in parsed_den_form:
       if (den_item.group(0).isdigit() or
           re.match('[\+\-\/\*]', den_item.group(0))):
         values['Calculation'] += ' ' + den_item.group(0)
+        if (den_item.group(0).isdigit() and
+            denominator_number == int(den_item.group(0))):
+          denominator_number_seen = True
       else:
         elements = re.match('#\{(\w*)\.?(\w*)\}', den_item.group(0))
         if elements:
@@ -270,6 +337,13 @@ class dhisParser():
               values['Validation comments'].append(vcomment) 
 
     values['Calculation'] += ' }'
+
+    if not denominator_number_seen:
+      values['Validation comments'].append(
+        'The denominator description contains a number (' +
+        str(denominator_number) +
+        ') which does not appear in the calculation of the denominator.'
+      )
     
     values['Definition validation code'] = \
       str(values['Definition validation code'])
