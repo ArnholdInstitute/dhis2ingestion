@@ -32,6 +32,8 @@ validation_errcodes = {
   16: 'bad id -- field is not in registry'
 }
 
+output_format = 'csv'
+
 def translateErrCode(input_errcode):
   outputs = []
   for errcode, error in validation_errcodes:
@@ -64,6 +66,23 @@ def constructDhisUrls(country):
           'https://' + dhis_params_dict[country]['baseUrl']]
 
 
+def getGroupIdsFromGroupDesc(country, group_desc):
+  full_login_url, _ = constructDhisUrls(country)
+  groups_url = full_login_url + '/api/indicatorGroups.json?paging=false'
+  
+  # This contains the parsed JSON DOM of the indicator group list, from which we
+  # can match indicator group display names against the group description.
+  group_list = json.loads(requests.get(groups_url).text)
+  
+  group_ids = {}
+  for indicator_group in group_list['indicatorGroups']:
+    if re.search(group_desc, indicator_group['displayName'], re.IGNORECASE):
+      group_ids[indicator_group['id']] = indicator_group['displayName']
+
+  return group_ids
+  
+  
+          
 class dhisParser():
   """ A class to parse DHIS2 system metadata
   
@@ -84,7 +103,7 @@ class dhisParser():
     authenticated_group_url = self.full_login_url + '/api/' + group_type + \
                               '/' + self.group
     
-    # This contains the parsed XML DOM of the indicator group, from which we
+    # This contains the parsed JSON DOM of the indicator group, from which we
     # can retrieve a list of indicator ids.
     group_desc = json.loads(requests.get(authenticated_group_url).text)
 
@@ -100,7 +119,6 @@ class dhisParser():
 
   # returns a validation warning if the element is not found.
   def getUnknownTypeMetadata(self, element_id):
-    valid_code = 0
     url = self.full_login_url + '/api/identifiableObjects/' + element_id
     idobj_metadata = json.loads(requests.get(url).text)
     if not idobj_metadata:
@@ -333,7 +351,7 @@ class dhisParser():
               vcomment = 'categoryOptionCombo ' + elements.group(2) +\
                 ' in denominator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
-                         'has no valid metadata.')
+                           'has no valid metadata.')
               values['Validation comments'].append(vcomment) 
 
     values['Calculation'] += ' }'
@@ -367,14 +385,28 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('--country', default='Senegal',
                       help='Which country\'s DHIS2 system are we scraping')
-  parser.add_argument('--output', default='testoutput.csv', help='Output file')
+  parser.add_argument('--output', default='testoutput.csv',
+                      help='Output file (CSV or JSON)')
   parser.add_argument('--group_id', default='',
-                      help='Specific indicatorGroup / dataElementGroup of interest')
+                      help='Id of specific indicatorGroup / dataElementGroup of interest')
+  parser.add_argument('--group_desc', default='',
+                      help='One-word descript of indicatorGroup of interest')
   args = parser.parse_args()
   
-  dhis_parser = dhisParser(args.country, args.group_id)
+  output_values = []
   
-  output_values = dhis_parser.outputAllIndicators()
+  if re.search('\.json', args.output): output_format = 'json'
+  
+  if (args.group_id) {
+    dhis_parser = dhisParser(args.country, args.group_id)
+    output_values = dhis_parser.outputAllIndicators()
+  } else if (args.group_desc) {
+    group_ids = getGroupIdsFromGroupDesc(args.country, args.group_desc)
+    for group_id in group_ids:
+      dhis_parser = dhisParser(args.country, args.group_id)
+      output_values += dhis_parser.outputAllIndicators()   
+    }
+  }
 
   with open(args.output, 'w') as ofh:
     ofh.write(','.join(fieldnames) + '\n')
