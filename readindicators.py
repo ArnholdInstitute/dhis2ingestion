@@ -32,8 +32,6 @@ validation_errcodes = {
   16: 'bad id -- field is not in registry'
 }
 
-output_format = 'csv'
-
 def translateErrCode(input_errcode):
   outputs = []
   for errcode, error in validation_errcodes:
@@ -87,7 +85,7 @@ class dhisParser():
   """ A class to parse DHIS2 system metadata
   
       :param country: country/DHIS2 system identifier
-      :param indicator_group: specific indicatorGroup/dataElementGroup of interest
+      :param group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
   """
   def __init__(self, country, group_id):
     self.country = country
@@ -105,12 +103,13 @@ class dhisParser():
     
     # This contains the parsed JSON DOM of the indicator group, from which we
     # can retrieve a list of indicator ids.
-    group_desc = json.loads(requests.get(authenticated_group_url).text)
+    group_metadata = json.loads(requests.get(authenticated_group_url).text)
+    self.group_desc = group_metadata['displayName']
 
     self.element_type = ('indicators'
       if (group_type == 'indicatorGroups') else 'dataElements')
     self.element_ids = list(map(lambda x: x['id'],
-                                group_desc[self.element_type]))
+                                group_metadata[self.element_type]))
     self.element_names = {}
     self.values = {}
     
@@ -157,6 +156,7 @@ class dhisParser():
   
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
+    values['Group Description'] = self.group_desc
     values['Definition validation code'] = 0
 
     if not indicator_json:
@@ -365,8 +365,8 @@ class dhisParser():
     
     values['Definition validation code'] = \
       str(values['Definition validation code'])
-    values['Validation comments'] = '\"' + \
-      '\n'.join(values['Validation comments']) + '\"'
+#    values['Validation comments'] = '\"' + \
+#      '\n'.join(values['Validation comments']) + '\"'
     
     return values
     
@@ -390,11 +390,12 @@ if __name__ == '__main__':
   parser.add_argument('--group_id', default='',
                       help='Id of specific indicatorGroup / dataElementGroup of interest')
   parser.add_argument('--group_desc', default='',
-                      help='One-word descript of indicatorGroup of interest')
+                      help='One-word description of indicatorGroup of interest')
   args = parser.parse_args()
   
   output_values = []
   
+  output_format = 'csv'
   if re.search('\.json', args.output): output_format = 'json'
   
   if (args.group_id) {
@@ -404,16 +405,22 @@ if __name__ == '__main__':
     group_ids = getGroupIdsFromGroupDesc(args.country, args.group_desc)
     for group_id in group_ids:
       dhis_parser = dhisParser(args.country, args.group_id)
-      output_values += dhis_parser.outputAllIndicators()   
+      output_values += dhis_parser.outputAllIndicators()
     }
   }
 
   with open(args.output, 'w') as ofh:
-    ofh.write(','.join(fieldnames) + '\n')
-    for value in output_values:
-      line = ''
-      for field in fieldnames:
-        line += (value[field] or '') + ','
-      ofh.write(line[:-1] + '\n')
+    if output_format == 'csv':
+      ofh.write(','.join(fieldnames) + '\n')
+      for value in output_values:
+        line = ''
+        if 'Validation comments' in value:
+          value['Validation comments'] = '\"' + \
+              '\n'.join(value['Validation comments']) + '\"'
+        for field in fieldnames:
+          line += (value[field] or '') + ','
+        ofh.write(line[:-1] + '\n')
+    else if output_format == 'json':
+      ofh.write(json.dumps({'indicators': output_values}))
 
 
