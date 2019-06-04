@@ -72,10 +72,10 @@ def getGroupIdsFromGroupDesc(country, group_desc):
   # can match indicator group display names against the group description.
   group_list = json.loads(requests.get(groups_url).text)
   
-  group_ids = {}
+  group_ids = []
   for indicator_group in group_list['indicatorGroups']:
     if re.search(group_desc, indicator_group['displayName'], re.IGNORECASE):
-      group_ids[indicator_group['id']] = indicator_group['displayName']
+      group_ids.append(indicator_group['id'])
 
   return group_ids
   
@@ -92,8 +92,7 @@ class dhisParser():
     self.full_login_url, self.display_url = constructDhisUrls(country)
     self.group = group_id
     
-    group_metadata_url = self.full_login_url + '/api/identifiableObjects/' +\
-                         self.group
+    group_metadata_url = self.full_login_url + '/api/identifiableObjects/' + self.group
     r = requests.get(group_metadata_url)
     parsed_metadata = json.loads(r.text)
 
@@ -398,16 +397,14 @@ if __name__ == '__main__':
   output_format = 'csv'
   if re.search('\.json', args.output): output_format = 'json'
   
-  if (args.group_id) {
+  if args.group_id:
     dhis_parser = dhisParser(args.country, args.group_id)
     output_values = dhis_parser.outputAllIndicators()
-  } else if (args.group_desc) {
+  elif args.group_desc:
     group_ids = getGroupIdsFromGroupDesc(args.country, args.group_desc)
     for group_id in group_ids:
-      dhis_parser = dhisParser(args.country, args.group_id)
+      dhis_parser = dhisParser(args.country, group_id)
       output_values += dhis_parser.outputAllIndicators()
-    }
-  }
 
   with open(args.output, 'w') as ofh:
     if output_format == 'csv':
@@ -420,7 +417,7 @@ if __name__ == '__main__':
         for field in fieldnames:
           line += (value[field] or '') + ','
         ofh.write(line[:-1] + '\n')
-    else if output_format == 'json':
+    elif output_format == 'json':
       ofh.write(json.dumps({'indicators': output_values}))
 
 
