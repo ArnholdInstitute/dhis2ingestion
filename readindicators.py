@@ -32,6 +32,11 @@ validation_errcodes = {
   16: 'bad id -- field is not in registry'
 }
 
+dhis_params_dict = {}
+with open(os.environ['DHIS2_PARAMS_FILE'], 'r') as ofh:
+  dhis_params_dict = json.load(ofh)
+
+
 def translateErrCode(input_errcode):
   outputs = []
   for errcode, error in validation_errcodes:
@@ -42,37 +47,35 @@ def translateErrCode(input_errcode):
   
 # constructs the url the given data - inputs are the element type, id, and name.
 def constructDisplayUrl(base_url, element_type, element_id, friendlyName):
-  output_url = base_url + '/api/' + element_type + '/' + element_id
+  output_url = 'https://' + base_url + '/api/' + element_type + '/' + element_id
   display_url = '=HYPERLINK(\"' + output_url + '\";\"' + friendlyName + '\")'
   return output_url, display_url
 
 
-# We expect dhis_params_dict to be a dictionary keyed by country; we expect
-# values to be dicts having "baseUrl", "username", and "password" as keys.
-# This dictionary should be stored in a JSON file.
-# The path to this file should be stored in an environment variable named
-# DHIS2_PARAMS_FILE.
 # This returns a pair [full_login_url, display_url]; the former has username/
 # password inherent in it and is never put into output.
-def constructDhisUrls(country):
-  dhis_params_dict = {}
-  dhis_params_file = os.environ['DHIS2_PARAMS_FILE']
-  with open(dhis_params_file, 'r') as ofh:
-    dhis_params_dict = json.load(ofh)
-
-  return ['https://' + dhis_params_dict[country]['username'] + ':' +
-            dhis_params_dict[country]['password'] + '@' +
-            dhis_params_dict[country]['baseUrl'],
-          'https://' + dhis_params_dict[country]['baseUrl']]
+def constructDhisUrls(auth_dict):
+  return ['https://' + auth_dict['username'] + ':' + auth_dict['password'] +
+            '@' + auth_dict['baseUrl'],
+          'https://' + auth_dict[country]['baseUrl']]
 
 
-def getGroupIdsFromGroupDesc(country, group_desc):
-  full_login_url, _ = constructDhisUrls(country)
-  groups_url = full_login_url + '/api/indicatorGroups.json?paging=false'
-  
+def getAuthorizedJson(auth_dict, url):
+  if 'token' in auth_dict:
+    headers = { 'Authorization': 'Bearer ' + auth_dict['token'] }
+    return json.loads(requests.get('https://' + url, header=headers).text)
+  else:
+    auth_url = 'https://' + auth_dict['username'] + ':' + auth_dict['password']\
+      + '@' + url
+    return json.loads(requests.get(auth_url).text)
+
+          
+def getGroupIdsFromGroupDesc(auth_dict, group_desc):
+  groups_url = auth_dict['baseUrl'] + '/api/indicatorGroups.json?paging=false'
+  group_list = getAuthorizedJson(auth_dict, groups_url)
+
   # This contains the parsed JSON DOM of the indicator group list, from which we
   # can match indicator group display names against the group description.
-  group_list = json.loads(requests.get(groups_url).text)
   
   group_ids = []
   for indicator_group in group_list['indicatorGroups']:
@@ -100,25 +103,21 @@ def camelCaseKeys(value_dict):
 class dhisParser():
   """ A class to parse DHIS2 system metadata
   
-      :param country: country/DHIS2 system identifier
       :param group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
   """
-  def __init__(self, country, group_id):
-    self.country = country
-    self.full_login_url, self.display_url = constructDhisUrls(country)
+  def __init__(self, auth_dict, group_id):
+    self.auth = auth_dict
     self.group = group_id
     
-    group_metadata_url = self.full_login_url + '/api/identifiableObjects/' + self.group
-    r = requests.get(group_metadata_url)
-    parsed_metadata = json.loads(r.text)
+    group_metadata_url = auth_dict['baseUrl'] + '/api/identifiableObjects/' + self.group
+    parsed_metadata =  getAuthorizedJson(self.auth, group_metadata_url)
 
     group_type = parsed_metadata['href'].split('/')[-2]
-    authenticated_group_url = self.full_login_url + '/api/' + group_type + \
-                              '/' + self.group
+    group_url = auth_dict['baseUrl'] + '/api/' + group_type + '/' + self.group
     
     # This contains the parsed JSON DOM of the indicator group, from which we
     # can retrieve a list of indicator ids.
-    group_metadata = json.loads(requests.get(authenticated_group_url).text)
+    group_metadata = getAuthorizedJson(self.auth, group_url)
     self.group_desc = group_metadata['displayName']
 
     self.element_type = ('indicators'
@@ -129,22 +128,22 @@ class dhisParser():
     self.values = {}
     
   def constructElementUrl(self, element_id):
-    return self.full_login_url + '/api/' + self.element_type + '/' + element_id
+    return self.auth['baseUrl'] + '/api/' + self.element_type + '/' + element_id
 
   # returns a validation warning if the element is not found.
   def getUnknownTypeMetadata(self, element_id):
-    url = self.full_login_url + '/api/identifiableObjects/' + element_id
-    idobj_metadata = json.loads(requests.get(url).text)
+    url = self.auth['baseUrl'] + '/api/identifiableObjects/' + element_id
+    idobj_metadata = getAuthorizedJson(self.auth, url)
     if not idobj_metadata:
       return None, 16
     elt_type = idobj_metadata['href'].split('/')[-2]
-    md_url = self.full_login_url + '/api/' + elt_type + '/' + element_id
+    md_url = self.auth['baseUrl'] + '/api/' + elt_type + '/' + element_id
     
-    return json.loads(requests.get(md_url).text), 0
+    return getAuthorizedJson(self.auth, md_url), 0
     
   def getKnownTypeMetadata(self, element_id, element_type):
-    url = self.full_login_url + '/api/' + element_type + '/' + element_id   
-    return json.loads(requests.get(url).text), 0
+    url = self.auth['baseUrl'] + '/api/' + element_type + '/' + element_id   
+    return getAuthorizedJson(self.auth, url), 0
 
   def getElementName(self, element_id):
     if element_id in self.element_names:
@@ -207,7 +206,7 @@ class dhisParser():
 
     values['Indicator name'] = displayName
     values['Indicator Url'], values['Display Url'] =\
-      constructDisplayUrl(self.display_url,
+      constructDisplayUrl(self.auth['baseUrl'],
                           'indicators',
                           indicator_id,
                           displayName)
@@ -402,6 +401,10 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('--country', default='Senegal',
                       help='Which country\'s DHIS2 system are we scraping')
+  parser.add_argument('--base_url', default='',
+                      help='Base URL of DHIS2 system, assuming not stored in JSON')
+  parser.add_argument('--auth_token', default='',
+                      help='Authorization token for DHIS2 system, assuming access creds not stored')
   parser.add_argument('--output', default='testoutput.csv',
                       help='Output file (CSV or JSON)')
   parser.add_argument('--group_id', default='',
@@ -415,13 +418,21 @@ if __name__ == '__main__':
   output_format = 'csv'
   if re.search('\.json', args.output): output_format = 'json'
   
+  auth = {}
+  if args.country:
+    auth = dhis_params_dict[args.country]
+  if args.base_url:
+    auth['baseUrl'] = args.base_url
+  if args.auth_token:
+    auth['token'] = args.auth_token
+  
   if args.group_id:
-    dhis_parser = dhisParser(args.country, args.group_id)
+    dhis_parser = dhisParser(auth, args.group_id)
     output_values = dhis_parser.outputAllIndicators()
   elif args.group_desc:
-    group_ids = getGroupIdsFromGroupDesc(args.country, args.group_desc)
+    group_ids = getGroupIdsFromGroupDesc(auth, args.group_desc)
     for group_id in group_ids:
-      dhis_parser = dhisParser(args.country, group_id)
+      dhis_parser = dhisParser(auth, group_id)
       output_values += dhis_parser.outputAllIndicators()
 
   with open(args.output, 'w') as ofh:
