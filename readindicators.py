@@ -38,12 +38,14 @@ def translateErrCode(input_errcode):
     if (errcode & input_errcode):
       outputs.append(error)
   return ' & '.join(outputs) | 'valid'
-    
+
+  
 # constructs the url the given data - inputs are the element type, id, and name.
 def constructDisplayUrl(base_url, element_type, element_id, friendlyName):
-	output_url = base_url + '/api/' + element_type + '/' + element_id
-	return '=HYPERLINK(\"' + output_url + '\";\"' + friendlyName + '\")'
-  
+  output_url = base_url + '/api/' + element_type + '/' + element_id
+  display_url = '=HYPERLINK(\"' + output_url + '\";\"' + friendlyName + '\")'
+  return output_url, display_url
+
 
 # We expect dhis_params_dict to be a dictionary keyed by country; we expect
 # values to be dicts having "baseUrl", "username", and "password" as keys.
@@ -78,8 +80,22 @@ def getGroupIdsFromGroupDesc(country, group_desc):
       group_ids.append(indicator_group['id'])
 
   return group_ids
+
   
-  
+# Takes in a dict, list, string, or number.  For a dict will take keys written
+# as human-readable text, and convert to camel-cased strings for JSON output.
+def camelCaseKeys(value_dict):
+  if not type(value_dict) is dict: return value_dict
+  output_dict = {}
+  for key in value_dict:
+    keySubstrings = key.split(' ')
+    ccaseKeySubstrs = list(map(lambda x: x.lower().capitalize(), keySubstrings))
+    capitalKey = ''.join(ccaseKeySubstrs)
+    camelCaseKey = capitalKey[:1].lower() + capitalKey[1:]
+    output_dict[camelCaseKey] = camelCaseKeys(value_dict[key])
+    
+  return output_dict
+    
           
 class dhisParser():
   """ A class to parse DHIS2 system metadata
@@ -189,10 +205,12 @@ class dhisParser():
         indicator_number_match.group(4)
       )
 
-    values['Indicator name'] = constructDisplayUrl(self.display_url,
-                                                   'indicators',
-                                                   indicator_id,
-                                                   displayName)
+    values['Indicator name'] = displayName
+    values['Indicator Url'], values['Display Url'] =\
+      constructDisplayUrl(self.display_url,
+                          'indicators',
+                          indicator_id,
+                          displayName)
 
     # store the numerator description
     values['Numerator description'] = '??????'
@@ -414,10 +432,16 @@ if __name__ == '__main__':
         if 'Validation comments' in value:
           value['Validation comments'] = '\"' + \
               '\n'.join(value['Validation comments']) + '\"'
+        if 'Indicator name' in value:
+          value['Indicator name'] = value['Display Url']
         for field in fieldnames:
           line += (value[field] or '') + ','
         ofh.write(line[:-1] + '\n')
     elif output_format == 'json':
-      ofh.write(json.dumps({'indicators': output_values}))
+      final_output_vals = []
+      for value in output_values:
+        del value['Display Url']
+        final_output_vals.append(camelCaseKeys(value))
+      ofh.write(json.dumps({'indicators': final_output_vals}))
 
 
