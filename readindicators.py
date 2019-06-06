@@ -41,7 +41,6 @@ except:
   print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
 
 
-
 def translateErrCode(input_errcode):
   outputs = []
   for errcode, error in validation_errcodes:
@@ -404,7 +403,7 @@ class dhisParser():
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
-  parser.add_argument('--country', default='Senegal',
+  parser.add_argument('--country', default='',
                       help='Which country\'s DHIS2 system are we scraping')
   parser.add_argument('--base_url', default='',
                       help='Base URL of DHIS2 system, assuming not stored in JSON')
