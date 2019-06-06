@@ -34,13 +34,13 @@ validation_errcodes = {
 }
 
 dhis_params_dict = {}
-try {
+try:
   with open(os.environ['DHIS2_PARAMS_FILE'], 'r') as ofh:
     dhis_params_dict = json.load(ofh)
-} except {
+except:
   print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
-}
-  
+
+
 
 def translateErrCode(input_errcode):
   outputs = []
