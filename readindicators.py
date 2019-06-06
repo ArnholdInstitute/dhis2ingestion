@@ -116,7 +116,11 @@ class dhisParser():
     group_metadata_url = auth_dict['baseUrl'] + '/api/identifiableObjects/' + self.group
     parsed_metadata = getAuthorizedJson(self.auth, group_metadata_url)
 
-    group_type = parsed_metadata['href'].split('/')[-2]
+    try:
+      group_type = parsed_metadata['href'].split('/')[-2]
+    except:
+      print("No valid metadata found for group id {}".format(self.group), file=sys.stderr)
+      raise
     group_url = auth_dict['baseUrl'] + '/api/' + group_type + '/' + self.group
     
     # This contains the parsed JSON DOM of the indicator group, from which we
@@ -435,8 +439,11 @@ if __name__ == '__main__':
   elif args.group_desc:
     group_ids = getGroupIdsFromGroupDesc(auth, args.group_desc)
   for group_id in group_ids:
-    dhis_parser = dhisParser(auth, group_id)
-    output_values += dhis_parser.outputAllIndicators()
+    try:
+      dhis_parser = dhisParser(auth, group_id)
+      output_values += dhis_parser.outputAllIndicators()
+    except:
+      print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
 
   if output_format == 'csv':
     print(','.join(fieldnames))
