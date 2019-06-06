@@ -406,8 +406,8 @@ if __name__ == '__main__':
   parser.add_argument('--auth_token', default='',
                       help='Authorization token for DHIS2 system, assuming access creds not stored')
   parser.add_argument('--output', default='csv', help='Output format (CSV or JSON)')
-  parser.add_argument('--group_id', default='',
-                      help='Id of specific indicatorGroup / dataElementGroup of interest')
+  parser.add_argument('--group_ids', default='',
+                      help='Ids of specific indicatorGroups of interest (comma-separated)')
   parser.add_argument('--group_desc', default='',
                       help='One-word description of indicatorGroup of interest')
   args = parser.parse_args()
@@ -425,14 +425,14 @@ if __name__ == '__main__':
   if args.auth_token:
     auth['token'] = args.auth_token
   
-  if args.group_id:
-    dhis_parser = dhisParser(auth, args.group_id)
-    output_values = dhis_parser.outputAllIndicators()
+  group_ids = []
+  if args.group_ids:
+    group_ids = args.group_ids.split(',')
   elif args.group_desc:
     group_ids = getGroupIdsFromGroupDesc(auth, args.group_desc)
-    for group_id in group_ids:
-      dhis_parser = dhisParser(auth, group_id)
-      output_values += dhis_parser.outputAllIndicators()
+  for group_id in group_ids:
+    dhis_parser = dhisParser(auth, group_id)
+    output_values += dhis_parser.outputAllIndicators()
 
   if output_format == 'csv':
     print(','.join(fieldnames))

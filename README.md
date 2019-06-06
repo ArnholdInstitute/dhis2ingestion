@@ -46,5 +46,6 @@ The parser takes in the following command-line arguments:
   with display names "Carte Score:PALUDISME", "Paludisme", "Paludisme_CU_Milda", and
   "Paludisme hebdomadaire".  
   
-"group_id" -- internal DHIS2 identifier of the indicatorGroup to be analyzed.  
+"group_ids" -- internal DHIS2 identifier(s) of the indicatorGroup(s) to be analyzed, provided as
+a comma-separated string.  
 **Will override "group_desc" argument.**  
