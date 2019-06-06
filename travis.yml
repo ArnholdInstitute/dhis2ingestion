@@ -1,7 +1,0 @@
-language: python
-cache: pip
-sudo: required
-
-install:
-  - pip install python-dotenv
-  - pip install requests
