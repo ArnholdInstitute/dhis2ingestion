@@ -1,15 +1,16 @@
 """
 This program is designed to scrape metadata from a DHIS2 system and output it
-in human-readable format. It expects there to be a JSON file containing base
+in human-readable format. It expects either 1) a JSON file containing base
 URL, username and password information, with the location of the file stored
-in a .env variable.
+in a .env variable or 2) an OAuth2 token.
 """
 
 import argparse
+import json
 import os
 import re
 import requests
-import json
+import sys
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
@@ -33,8 +34,13 @@ validation_errcodes = {
 }
 
 dhis_params_dict = {}
-with open(os.environ['DHIS2_PARAMS_FILE'], 'r') as ofh:
-  dhis_params_dict = json.load(ofh)
+try {
+  with open(os.environ['DHIS2_PARAMS_FILE'], 'r') as ofh:
+    dhis_params_dict = json.load(ofh)
+} except {
+  print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
+}
+  
 
 
 def translateErrCode(input_errcode):
