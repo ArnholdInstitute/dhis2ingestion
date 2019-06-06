@@ -11,12 +11,12 @@ In the event of username/passwords being stored locally, the JSON file should be
 formatted as  
 
     {  
-      countryName1: {  
+      country1: {  
         username: username1,  
         password: password1,  
         baseUrl: URL1  
       },
-      countryName2: {  
+      country2: {  
         ...  
       }  
       ...  
