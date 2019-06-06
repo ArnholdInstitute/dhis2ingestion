@@ -42,7 +42,6 @@ try {
 }
   
 
-
 def translateErrCode(input_errcode):
   outputs = []
   for errcode, error in validation_errcodes:
