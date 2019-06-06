@@ -46,5 +46,4 @@ The parser takes in the following command-line arguments:
   "Paludisme hebdomadaire".  
   
 "group_id" -- internal DHIS2 identifier of the indicatorGroup to be analyzed.  
-
-    **Will override "group_desc" argument**  
+**Will override "group_desc" argument**  
