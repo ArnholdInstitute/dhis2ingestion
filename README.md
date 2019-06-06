@@ -9,17 +9,17 @@ as a command-line argument) or as username/password stored locally in a JSON fil
 
 In the event of username/passwords being stored locally, the JSON file should be  
 formatted as  
-{  
-  countryName1: {  
-    username: username1,  
-    password: password1,  
-    baseUrl: URL1  
-  },
-  countryName2: {  
-    ...  
-  }  
-  ...  
-}
+    {  
+      countryName1: {  
+        username: username1,  
+        password: password1,  
+        baseUrl: URL1  
+      },
+      countryName2: {  
+        ...  
+      }  
+      ...  
+    }  
 with the URLs being everything between "https://" and "/api" in the DHIS2 API calls.  
 The location of the JSON file should be stored in the "DHIS2_PARAMS_FILE" environment  
 variable.  
