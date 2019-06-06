@@ -27,18 +27,24 @@ The location of the JSON file should be stored in the "DHIS2_PARAMS_FILE" enviro
 variable.  
 
 The parser takes in the following command-line arguments:  
-"country" -- a key from the DHIS2 params file, to be used only if username/passwords are  
+"country" -- a key from the DHIS2 params file, to be used only if username/passwords are
   stored locally.
-"base_url" -- the base url of the DHIS2 system, will override the "baseUrl" field from the  
-  DHIS2 params file if both are provided.  
-"auth_token" -- an OAuth2 authentication token; if both "country" and "auth_token" are  
+  
+"base_url" -- the base url of the DHIS2 system, will override the "baseUrl" field from the
+  DHIS2 params file if both are provided. 
+  
+"auth_token" -- an OAuth2 authentication token; if both "country" and "auth_token" are
   provided, the "auth_token" field takes priority.  
-"output" -- desired location of the output file, also governs output format (CSV is default,  
-  providing an output file with a ".json" extension will switch to JSON output format).  
-"group_desc" -- a description of the indicatorGroup(s) to be analyzed. The program will check  
-  the display names of all indicator groups for substrings which match "group_desc" in a  
-  case-insensitive fashion. So for example, group_desc="Paludism" would match indicatorGroups  
-  with display names "Carte Score:PALUDISME", "Paludisme", "Paludisme_CU_Milda", and  
+  
+"output" -- desired location of the output file, also governs output format (CSV is default,
+  providing an output file with a ".json" extension will switch to JSON output format).
+  
+"group_desc" -- a description of the indicatorGroup(s) to be analyzed. The program will check
+  the display names of all indicator groups for substrings which match "group_desc" in a
+  case-insensitive fashion. So for example, group_desc="Paludism" would match indicatorGroups
+  with display names "Carte Score:PALUDISME", "Paludisme", "Paludisme_CU_Milda", and
   "Paludisme hebdomadaire".  
+  
 "group_id" -- internal DHIS2 identifier of the indicatorGroup to be analyzed.  
-  **Will override "group_desc" argument**  
+
+    **Will override "group_desc" argument**  
