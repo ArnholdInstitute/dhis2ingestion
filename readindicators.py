@@ -63,7 +63,7 @@ def constructDhisUrls(auth_dict):
 def getAuthorizedJson(auth_dict, url):
   if 'token' in auth_dict:
     headers = { 'Authorization': 'Bearer ' + auth_dict['token'] }
-    return json.loads(requests.get('https://' + url, header=headers).text)
+    return json.loads(requests.get('https://' + url, headers=headers).text)
   else:
     auth_url = 'https://' + auth_dict['username'] + ':' + auth_dict['password']\
       + '@' + url
