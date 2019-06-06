@@ -1,4 +1,5 @@
 Usage: "python ./readindicators.py [--args] > output_file"
+Requires Python 3.
 
 This program is designed to scrape metadata from a DHIS2 system and output it
 in human-readable format (either CSV for consumption by Excel/OpenOffice, or
