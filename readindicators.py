@@ -405,8 +405,7 @@ if __name__ == '__main__':
                       help='Base URL of DHIS2 system, assuming not stored in JSON')
   parser.add_argument('--auth_token', default='',
                       help='Authorization token for DHIS2 system, assuming access creds not stored')
-  parser.add_argument('--output', default='testoutput.csv',
-                      help='Output file (CSV or JSON)')
+  parser.add_argument('--output', default='csv', help='Output format (CSV or JSON)')
   parser.add_argument('--group_id', default='',
                       help='Id of specific indicatorGroup / dataElementGroup of interest')
   parser.add_argument('--group_desc', default='',
@@ -416,7 +415,7 @@ if __name__ == '__main__':
   output_values = []
   
   output_format = 'csv'
-  if re.search('\.json', args.output): output_format = 'json'
+  if args.output.lower() == 'json': output_format = 'json'
   
   auth = {}
   if args.country:
@@ -435,24 +434,23 @@ if __name__ == '__main__':
       dhis_parser = dhisParser(auth, group_id)
       output_values += dhis_parser.outputAllIndicators()
 
-  with open(args.output, 'w') as ofh:
-    if output_format == 'csv':
-      ofh.write(','.join(fieldnames) + '\n')
-      for value in output_values:
-        line = ''
-        if 'Validation comments' in value:
-          value['Validation comments'] = '\"' + \
-              '\n'.join(value['Validation comments']) + '\"'
-        if 'Indicator name' in value:
-          value['Indicator name'] = value['Display Url']
-        for field in fieldnames:
-          line += (value[field] or '') + ','
-        ofh.write(line[:-1] + '\n')
-    elif output_format == 'json':
-      final_output_vals = []
-      for value in output_values:
-        del value['Display Url']
-        final_output_vals.append(camelCaseKeys(value))
-      ofh.write(json.dumps({'indicators': final_output_vals}))
+  if output_format == 'csv':
+    print(','.join(fieldnames))
+    for value in output_values:
+      line = ''
+      if 'Validation comments' in value:
+        value['Validation comments'] = '\"' + \
+            '\n'.join(value['Validation comments']) + '\"'
+      if 'Indicator name' in value:
+        value['Indicator name'] = value['Display Url']
+      for field in fieldnames:
+        line += (value[field] or '') + ','
+      print(line[:-1])
+  elif output_format == 'json':
+    final_output_vals = []
+    for value in output_values:
+      del value['Display Url']
+      final_output_vals.append(camelCaseKeys(value))
+    print(json.dumps({'indicators': final_output_vals}))
 
 

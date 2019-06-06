@@ -5,7 +5,7 @@ JSON for use by other programs).
 It expects access credentials to be provided for the DHIS2 system in question;
 these access credentials can either be in the form of an OAuth2 token (provided
 as a command-line argument) or as username/password stored locally in a JSON file
-(NOT PREFERRED).
+(**NOT PREFERRED**).
 
 In the event of username/passwords being stored locally, the JSON file should be  
 formatted as  
