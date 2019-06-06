@@ -77,7 +77,7 @@ def getAuthorizedJson(auth_dict, url):
 def getGroupIdsFromGroupDesc(auth_dict, group_desc):
   groups_url = auth_dict['baseUrl'] + '/api/indicatorGroups.json?paging=false'
   group_list = getAuthorizedJson(auth_dict, groups_url)
-
+    
   # This contains the parsed JSON DOM of the indicator group list, from which we
   # can match indicator group display names against the group description.
   
@@ -114,7 +114,7 @@ class dhisParser():
     self.group = group_id
     
     group_metadata_url = auth_dict['baseUrl'] + '/api/identifiableObjects/' + self.group
-    parsed_metadata =  getAuthorizedJson(self.auth, group_metadata_url)
+    parsed_metadata = getAuthorizedJson(self.auth, group_metadata_url)
 
     group_type = parsed_metadata['href'].split('/')[-2]
     group_url = auth_dict['baseUrl'] + '/api/' + group_type + '/' + self.group
@@ -415,7 +415,7 @@ if __name__ == '__main__':
   parser.add_argument('--group_desc', default='',
                       help='One-word description of indicatorGroup of interest')
   args = parser.parse_args()
-  
+
   output_values = []
   
   output_format = 'csv'
@@ -456,5 +456,4 @@ if __name__ == '__main__':
       del value['Display Url']
       final_output_vals.append(camelCaseKeys(value))
     print(json.dumps({'indicators': final_output_vals}))
-
 
