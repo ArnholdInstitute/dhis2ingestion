@@ -197,7 +197,6 @@ class dhisParser():
   
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
-    values['Group Description'] = self.group_desc
     values['Definition validation code'] = 0
 
     if not indicator_json:
@@ -423,7 +422,9 @@ class dhisParser():
       executor.map(self.addDescToDict, self.element_ids)
       
     for indicator_id in self.element_ids:
-      output_values.append(self.elt_id_to_desc[indicator_id].copy())
+      tmp_desc = self.elt_id_to_desc[indicator_id].copy()
+      tmp_desc['Group Description'] = self.group_desc
+      output_values.append(tmp_desc)
       
     return output_values
 
@@ -472,11 +473,20 @@ def main(args):
         line += (value[field] or '') + ','
       print(line[:-1])
   elif output_format == 'json':
-    final_output_vals = []
+    indicator_groups = {}
     for value in output_values:
       del value['Display Url']
-      final_output_vals.append(camelCaseKeys(value))
-    print(json.dumps({'indicators': final_output_vals}))
+      igroup = value['Group Description']
+      del value['Group Description']
+      if not igroup in indicator_groups:
+        indicator_groups[igroup] = []
+      indicator_groups[igroup].append(camelCaseKeys(value))
+
+    final_output_vals = []
+    for igroup in indicator_groups:
+      final_output_vals.append({ 'groupDescription': igroup,\
+        'indicators': indicator_groups[igroup] })
+    print(json.dumps({'indicatorGroups': final_output_vals}, indent=4, sort_keys=True))
 
 
 if __name__ == '__main__':
