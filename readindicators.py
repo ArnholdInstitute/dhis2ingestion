@@ -6,13 +6,18 @@ in a .env variable or 2) an OAuth2 token.
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
 import requests
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
+
+NUM_THREADS = 10
 
 fieldnames = [
   'Indicator name',
@@ -65,13 +70,15 @@ def constructDhisUrls(auth_dict):
 
 
 def getAuthorizedJson(auth_dict, url):
+  result = { 'text' : None }
   if 'token' in auth_dict:
     headers = { 'Authorization': 'Bearer ' + auth_dict['token'] }
-    return json.loads(requests.get('https://' + url, headers=headers).text)
+    result = requests.get('https://' + url, headers=headers)
   else:
     auth_url = 'https://' + auth_dict['username'] + ':' + auth_dict['password']\
       + '@' + url
-    return json.loads(requests.get(auth_url).text)
+    result = requests.get(auth_url)
+  return json.loads(result.text)
 
           
 def getGroupIdsFromGroupDesc(auth_dict, group_desc):
@@ -107,33 +114,40 @@ def camelCaseKeys(value_dict):
 class dhisParser():
   """ A class to parse DHIS2 system metadata
   
-      :param group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
+      :param auth_dict: Dictionary of DHIS2 authorization data
   """
-  def __init__(self, auth_dict, group_id):
+  def __init__(self, auth_dict):
     self.auth = auth_dict
-    self.group = group_id
+    self.elt_id_to_desc = {}
+    self.element_names = {}
+    self.values = {}
+    self.group = None
+    self.group_desc = None
+    self.element_type = None
+    self.element_ids = []
     
-    group_metadata_url = auth_dict['baseUrl'] + '/api/identifiableObjects/' + self.group
+  # group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
+  def setGroupId(self, group_id):
+    self.group = group_id
+    group_metadata_url = self.auth['baseUrl'] + '/api/identifiableObjects/' + self.group
     parsed_metadata = getAuthorizedJson(self.auth, group_metadata_url)
-
+    
     try:
       group_type = parsed_metadata['href'].split('/')[-2]
     except:
       print("No valid metadata found for group id {}".format(self.group), file=sys.stderr)
       raise
-    group_url = auth_dict['baseUrl'] + '/api/' + group_type + '/' + self.group
+    group_url = self.auth['baseUrl'] + '/api/' + group_type + '/' + self.group
     
     # This contains the parsed JSON DOM of the indicator group, from which we
     # can retrieve a list of indicator ids.
     group_metadata = getAuthorizedJson(self.auth, group_url)
     self.group_desc = group_metadata['displayName']
-
+    
     self.element_type = ('indicators'
       if (group_type == 'indicatorGroups') else 'dataElements')
     self.element_ids = list(map(lambda x: x['id'],
                                 group_metadata[self.element_type]))
-    self.element_names = {}
-    self.values = {}
     
   def constructElementUrl(self, element_id):
     return self.auth['baseUrl'] + '/api/' + self.element_type + '/' + element_id
@@ -150,9 +164,14 @@ class dhisParser():
     return getAuthorizedJson(self.auth, md_url), 0
     
   def getKnownTypeMetadata(self, element_id, element_type):
-    url = self.auth['baseUrl'] + '/api/' + element_type + '/' + element_id   
+    url = self.auth['baseUrl'] + '/api/' + element_type + '/' + element_id
     return getAuthorizedJson(self.auth, url), 0
 
+  # This is the only place where we can get a race condition; indicator ids
+  # will only show up once in the list of element ids and so we will query
+  # their metadata exactly once. Data element ids however can show up in
+  # the metadata of multiple indicators, so we need to be sure we only
+  # query their metadata once.
   def getElementName(self, element_id):
     if element_id in self.element_names:
       return self.element_names[element_id]
@@ -387,22 +406,77 @@ class dhisParser():
         ') which does not appear in the calculation of the denominator.'
       )
     
-    values['Definition validation code'] = \
-      str(values['Definition validation code'])
-#    values['Validation comments'] = '\"' + \
-#      '\n'.join(values['Validation comments']) + '\"'
-    
     return values
+    
+  def addDescToDict(self, indicator_id):
+    if indicator_id in self.elt_id_to_desc: return
+    self.elt_id_to_desc[indicator_id] =\
+      self.getIndicatorDescription(indicator_id)
+    return
     
   def outputAllIndicators(self):
     if self.element_type != 'indicators':
       return []
       
     output_values = []
+    with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+      executor.map(self.addDescToDict, self.element_ids)
+      
     for indicator_id in self.element_ids:
-      output_values.append(self.getIndicatorDescription(indicator_id).copy())
+      output_values.append(self.elt_id_to_desc[indicator_id].copy())
       
     return output_values
+
+
+def main(args):
+  output_values = [] 
+  output_format = 'csv'
+  if args.output.lower() == 'json': output_format = 'json'
+  
+  auth = {}
+  if args.country:
+    auth = dhis_params_dict[args.country]
+  if args.base_url:
+    auth['baseUrl'] = args.base_url
+  if args.auth_token:
+    auth['token'] = args.auth_token
+
+  dhis_parser = dhisParser(auth)
+
+  group_ids = []
+  if args.group_ids:
+    group_ids = args.group_ids.split(',')
+  elif args.group_desc:
+    group_ids = getGroupIdsFromGroupDesc(auth, args.group_desc)
+    
+  for group_id in group_ids:
+    try:
+      dhis_parser.setGroupId(group_id)
+      output_values += dhis_parser.outputAllIndicators()
+    except:
+      print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
+
+  if output_format == 'csv':
+    print(','.join(fieldnames))
+    for value in output_values:
+      line = ''
+      if 'Validation comments' in value:
+        value['Validation comments'] = '\"' + \
+            '\n'.join(value['Validation comments']) + '\"'
+      if 'Indicator name' in value:
+        value['Indicator name'] = value['Display Url']
+      if 'Definition validation code' in value:
+        value['Definition validation code'] =\
+          str(value['Definition validation code'])
+      for field in fieldnames:
+        line += (value[field] or '') + ','
+      print(line[:-1])
+  elif output_format == 'json':
+    final_output_vals = []
+    for value in output_values:
+      del value['Display Url']
+      final_output_vals.append(camelCaseKeys(value))
+    print(json.dumps({'indicators': final_output_vals}))
 
 
 if __name__ == '__main__':
@@ -419,48 +493,4 @@ if __name__ == '__main__':
   parser.add_argument('--group_desc', default='',
                       help='One-word description of indicatorGroup of interest')
   args = parser.parse_args()
-
-  output_values = []
-  
-  output_format = 'csv'
-  if args.output.lower() == 'json': output_format = 'json'
-  
-  auth = {}
-  if args.country:
-    auth = dhis_params_dict[args.country]
-  if args.base_url:
-    auth['baseUrl'] = args.base_url
-  if args.auth_token:
-    auth['token'] = args.auth_token
-  
-  group_ids = []
-  if args.group_ids:
-    group_ids = args.group_ids.split(',')
-  elif args.group_desc:
-    group_ids = getGroupIdsFromGroupDesc(auth, args.group_desc)
-  for group_id in group_ids:
-    try:
-      dhis_parser = dhisParser(auth, group_id)
-      output_values += dhis_parser.outputAllIndicators()
-    except:
-      print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
-
-  if output_format == 'csv':
-    print(','.join(fieldnames))
-    for value in output_values:
-      line = ''
-      if 'Validation comments' in value:
-        value['Validation comments'] = '\"' + \
-            '\n'.join(value['Validation comments']) + '\"'
-      if 'Indicator name' in value:
-        value['Indicator name'] = value['Display Url']
-      for field in fieldnames:
-        line += (value[field] or '') + ','
-      print(line[:-1])
-  elif output_format == 'json':
-    final_output_vals = []
-    for value in output_values:
-      del value['Display Url']
-      final_output_vals.append(camelCaseKeys(value))
-    print(json.dumps({'indicators': final_output_vals}))
-
+  main(args)
