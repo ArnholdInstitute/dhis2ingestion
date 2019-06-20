@@ -20,6 +20,7 @@ load_dotenv(find_dotenv())
 NUM_THREADS = 10
 
 fieldnames = [
+  'Group Description',
   'Indicator name',
   'Numerator description',
   'Denominator description',
