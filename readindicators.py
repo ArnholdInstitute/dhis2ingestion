@@ -21,6 +21,7 @@ NUM_THREADS = 10
 
 fieldnames = [
   'Group Description',
+  'Indicator id',
   'Indicator name',
   'Numerator description',
   'Denominator description',
@@ -87,8 +88,7 @@ def getGroupIdsFromGroupDesc(auth_dict, group_desc):
   group_list = getAuthorizedJson(auth_dict, groups_url)
     
   # This contains the parsed JSON DOM of the indicator group list, from which we
-  # can match indicator group display names against the group description.
-  
+  # can match indicator group display names against the group description. 
   group_ids = []
   for indicator_group in group_list['indicatorGroups']:
     if re.search(group_desc, indicator_group['displayName'], re.IGNORECASE):
@@ -126,6 +126,30 @@ class dhisParser():
     self.group_desc = None
     self.element_type = None
     self.element_ids = []
+    self.indicator_type_map = {}
+    self.getIndicatorTypeMap()
+    
+  # Indicator types are e.g. "number", "percent", "per thousand";
+  # we want a mapping from indicator type id to numerical factor in the denominator.
+  def getIndicatorTypeMap(self):
+    it_url = self.auth['baseUrl'] + '/api/indicatorTypes'
+    parsed_metadata = getAuthorizedJson(self.auth, it_url)
+    
+    # Note: add alternate languages
+    factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
+                    'million': 1000000, 'billion': 1000000000, 'cent': 100 }
+    for indicType in parsed_metadata['indicatorTypes']:
+      numerical_factor = 1
+      for factor in factor_dict:
+        if re.search(factor, indicType['displayName'], re.IGNORECASE):
+          numerical_factor *= factor_dict[factor]
+      number_factor_match = re.search(
+          '(\d+)', re.sub('\s', '', indicType['displayName']))
+      # If the indicator type description contains an explicit number written
+      # numerically, use that as opposed to any parsed text.
+      if number_factor_match:
+        numerical_factor = int(number_factor_match.group(1))
+      self.indicator_type_map[indicType['id']] = numerical_factor
     
   # group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
   def setGroupId(self, group_id):
@@ -136,7 +160,8 @@ class dhisParser():
     try:
       group_type = parsed_metadata['href'].split('/')[-2]
     except:
-      print("No valid metadata found for group id {}".format(self.group), file=sys.stderr)
+      print("No valid metadata found for group id {}".format(self.group),
+            file=sys.stderr)
       raise
     group_url = self.auth['baseUrl'] + '/api/' + group_type + '/' + self.group
     
@@ -199,6 +224,7 @@ class dhisParser():
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
     values['Definition validation code'] = 0
+    values['Indicator id'] = indicator_id
 
     if not indicator_json:
       values['Definition validation code'] = 8
@@ -217,18 +243,23 @@ class dhisParser():
       values['Validation comments'].append(
         'Indicator ' + indicator_id + ' has no display name.'
       )
+      
+    indicator_type_number = 1
+    if 'indicatorType' in indicator_json and 'id' in indicator_json['indicatorType']:
+      it_id = indicator_json['indicatorType']['id']
+      if it_id in self.indicator_type_map:
+        indicator_type_number = self.indicator_type_map[it_id]
 
+    display_number_regex = '(?:pour|per|par|[\*\/])\s*(\d+)|(\d+)\*\s*'
     indicator_number_match = re.search(
-      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      display_number_regex,
       re.sub('\s', '', displayName)
     )
     indicator_number = None
     if indicator_number_match:
       indicator_number = int(
         indicator_number_match.group(1) or
-        indicator_number_match.group(2) or
-        indicator_number_match.group(3) or
-        indicator_number_match.group(4)
+        indicator_number_match.group(2)
       )
 
     values['Indicator name'] = displayName
@@ -247,16 +278,14 @@ class dhisParser():
       values['Validation comments'].append('No description of the numerator.')
 
     numerator_number_match = re.search(
-      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      display_number_regex,
       values['Numerator description']
     )
     numerator_number = None
     if numerator_number_match:
       numerator_number = int(
         numerator_number_match.group(1) or
-        numerator_number_match.group(2) or
-        numerator_number_match.group(3) or
-        numerator_number_match.group(4)
+        numerator_number_match.group(2)
       )
       
     # store the denominator description
@@ -272,7 +301,7 @@ class dhisParser():
       )
         
     denominator_number_match = re.search(
-      'pour\s*(\d+)|per\s*(\d+)|[\*\/]\s*(\d+)|(\d+)\*\s*',
+      display_number_regex,
       values['Denominator description']
     )
     denominator_number = None
@@ -280,19 +309,19 @@ class dhisParser():
     if denominator_number_match:
       denominator_number = int(
         denominator_number_match.group(1) or
-        denominator_number_match.group(2) or
-        denominator_number_match.group(3) or
-        denominator_number_match.group(4)
+        denominator_number_match.group(2)
       )
       if denominator_number == 1:
         denominator_number = None
 
     if (indicator_number and indicator_number != denominator_number and
-        indicator_number != numerator_number):
+        indicator_number != numerator_number and
+        indicator_number != indicator_type_number):
       values['Definition validation code'] |= 1
       values['Validation comments'].append(
         'Indicator description has a number in it (' + str(indicator_number) +
-        ') which does not appear in numerator or denominator descriptions.'
+        ') which does not appear in numerator or denominator descriptions or ' +
+        'the indicator type.'
       )
 
     # get the numerator formula
@@ -316,14 +345,18 @@ class dhisParser():
         'Denominator formula does not match description.')
 
     # parse the numerator and denominator dataElement formulas to English
-    # 	all possible elements: #{xxxxxx}, sometimes #{xxxxx.xxxxx}, 
-    #   operators (+,-,*), and numbers (int).
+    # 	all possible elements: ([#ACDIR]|OUG){xxxxxx}, sometimes 
+    #   ([#ACDIR]|OUG){xxxxx.xxxxx}, operators (+,-,*), and numbers (int).
     #   create a list of id's, navigate to their url, and replace the num/den
     #   id's with the descriptions
-    parsed_num_form = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
-                                  numerator)
-    parsed_den_form = re.finditer('(#\{\w*\.?\w*\})|[\+\-\/\*]|(\d*)',
-                                  denominator)
+    vbl_prefix_regex = '(?:[#ACDIR]|OUG)'
+    vbl_regex = '(' + vbl_prefix_regex + '\{(\w*)\.?(\w*)\})'
+    oper_regex = '[\+\-\/\*]'
+    number_regex = '(\d+)'
+    total_regex = vbl_regex + '|' + oper_regex + '|' + number_regex
+    
+    parsed_num_form = re.finditer(total_regex, numerator)
+    parsed_den_form = re.finditer(total_regex, denominator)
 
     # iterate through parsed formulas; extract friendly names of elements
     # and pass operators/numbers through as is.
@@ -332,33 +365,33 @@ class dhisParser():
     values['Calculation'] = '{'
     for num_item in parsed_num_form:
       if (num_item.group(0).isdigit() or
-          re.match('[\+\-\/\*]', num_item.group(0))):
+          re.match(oper_regex, num_item.group(0))):
         values['Calculation'] += ' ' + num_item.group(0)
         if (num_item.group(0).isdigit() and
             int(num_item.group(0)) == numerator_number):
           numerator_number_seen = True
       else:
-        elements = re.match('#\{(\w*)\.?(\w*)\}', num_item.group(0))
+        elements = re.match(vbl_regex, num_item.group(0))
         if elements:
-          data_elt_name, elt_vcode = self.getElementName(elements.group(1))
+          data_elt_name, elt_vcode = self.getElementName(elements.group(2))
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
-            vcomment = 'dataElement ' + elements.group(1) +\
+            vcomment = 'dataElement ' + elements.group(2) +\
               ' in numerator formula is not well defined - '
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
             values['Validation comments'].append(vcomment)
-          if elements.group(2):
-            coc_name, coc_vcode = self.getElementName(elements.group(2))
+          if elements.group(3):
+            coc_name, coc_vcode = self.getElementName(elements.group(3))
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
               values['Definition validation code'] |= 1 | coc_vcode
-              vcomment = 'categoryOptionCombo ' + elements.group(2) +\
+              vcomment = 'categoryOptionCombo ' + elements.group(3) +\
                 ' in numerator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
-              values['Validation comments'].append(vcomment)              
+              values['Validation comments'].append(vcomment)
 
     if not numerator_number_seen:
       values['Validation comments'].append(
@@ -370,28 +403,28 @@ class dhisParser():
     values['Calculation'] += ' } / {'
     for den_item in parsed_den_form:
       if (den_item.group(0).isdigit() or
-          re.match('[\+\-\/\*]', den_item.group(0))):
+          re.match(oper_regex, den_item.group(0))):
         values['Calculation'] += ' ' + den_item.group(0)
         if (den_item.group(0).isdigit() and
             denominator_number == int(den_item.group(0))):
           denominator_number_seen = True
       else:
-        elements = re.match('#\{(\w*)\.?(\w*)\}', den_item.group(0))
+        elements = re.match(vbl_regex, den_item.group(0))
         if elements:
-          data_elt_name, elt_vcode = self.getElementName(elements.group(1))
+          data_elt_name, elt_vcode = self.getElementName(elements.group(2))
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
-            vcomment = 'dataElement ' + elements.group(1) +\
+            vcomment = 'dataElement ' + elements.group(2) +\
               ' in denominator formula is not well defined - '
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
             values['Validation comments'].append(vcomment)
-          if elements.group(2):
-            coc_name, coc_vcode = self.getElementName(elements.group(2))
+          if elements.group(3):
+            coc_name, coc_vcode = self.getElementName(elements.group(3))
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
-              vcomment = 'categoryOptionCombo ' + elements.group(2) +\
+              vcomment = 'categoryOptionCombo ' + elements.group(3) +\
                 ' in denominator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                            'has no valid metadata.')
