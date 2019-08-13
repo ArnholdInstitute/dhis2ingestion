@@ -350,7 +350,8 @@ class dhisParser():
     #   create a list of id's, navigate to their url, and replace the num/den
     #   id's with the descriptions
     vbl_prefix_regex = '(?:[#ACDIR]|OUG)'
-    vbl_regex = '(' + vbl_prefix_regex + '\{(\w*)\.?(\w*)\})'
+    vbl_regex = '(' + vbl_prefix_regex +\
+                '\{([\w|\*]*)\.?([\w|\*]*)\.?([\w|\*]*)\})'
     oper_regex = '[\+\-\/\*]'
     number_regex = '(\d+)'
     total_regex = vbl_regex + '|' + oper_regex + '|' + number_regex
@@ -382,12 +383,17 @@ class dhisParser():
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
             values['Validation comments'].append(vcomment)
-          if elements.group(3):
-            coc_name, coc_vcode = self.getElementName(elements.group(3))
+          acOC = None
+          if elements.group(3) and elements.group(3) != '*':
+            acOC = elements.group(3)
+          elif elements.group(4):
+            acOC = elements.group(4)
+          if acOC:
+            coc_name, coc_vcode = self.getElementName(acOC)
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
               values['Definition validation code'] |= 1 | coc_vcode
-              vcomment = 'categoryOptionCombo ' + elements.group(3) +\
+              vcomment = 'attribute/categoryOptionCombo ' + acOC +\
                 ' in numerator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
@@ -420,11 +426,16 @@ class dhisParser():
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                          'has no valid metadata.')
             values['Validation comments'].append(vcomment)
-          if elements.group(3):
-            coc_name, coc_vcode = self.getElementName(elements.group(3))
+          acOC = None
+          if elements.group(3) and elements.group(3) != '*':
+            acOC = elements.group(3)
+          elif elements.group(4):
+            acOC = elements.group(4)
+          if acOC:
+            coc_name, coc_vcode = self.getElementName(acOC)
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
-              vcomment = 'categoryOptionCombo ' + elements.group(3) +\
+              vcomment = 'categoryOptionCombo ' + acOC +\
                 ' in denominator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
                            'has no valid metadata.')
