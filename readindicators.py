@@ -224,10 +224,12 @@ class dhisParser():
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
     values['Definition validation code'] = 0
+    values['Validation values'] = {}
     values['Indicator id'] = indicator_id
 
     if not indicator_json:
       values['Definition validation code'] = 8
+      values['Validation values'] = { 8: [indicator_id] }
       values['Validation comments'] = \
         'Indicator ' + indicator_id + ' not found - has no registry entry.'
       return values
@@ -240,6 +242,9 @@ class dhisParser():
       displayName = indicator_json['displayName']
     else:
       values['Definition validation code'] = 4
+      if not 4 in values['Validation values']:
+        values['Validation values'][4] = []
+      values['Validation values'][4].append(indicator_id)
       values['Validation comments'].append(
         'Indicator ' + indicator_id + ' has no display name.'
       )
@@ -275,6 +280,9 @@ class dhisParser():
       values['Numerator description'] = indicator_json['numeratorDescription']
     else:
       values['Definition validation code'] = 4
+      if not 4 in values['Validation values']:
+        values['Validation values'][4] = []
+      values['Validation values'][4].append('Numerator')      
       values['Validation comments'].append('No description of the numerator.')
 
     numerator_number_match = re.search(
@@ -296,6 +304,9 @@ class dhisParser():
         indicator_json['denominatorDescription']
     else:
       values['Definition validation code'] = 4
+      if not 4 in values['Validation values']:
+        values['Validation values'][4] = []
+      values['Validation values'][4].append('Denominator') 
       values['Validation comments'].append(
         'No description of the denominator; we assume it is 1.'
       )
@@ -318,6 +329,9 @@ class dhisParser():
         indicator_number != numerator_number and
         indicator_number != indicator_type_number):
       values['Definition validation code'] |= 1
+      if not 1 in values['Validation values']:
+        values['Validation values'][1] = []
+      values['Validation values'][1].append(indicator_number) 
       values['Validation comments'].append(
         'Indicator description has a number in it (' + str(indicator_number) +
         ') which does not appear in numerator or denominator descriptions or ' +
@@ -330,6 +344,9 @@ class dhisParser():
       numerator = indicator_json['numerator']
     else:
       values['Definition validation code'] |= 2
+      if not 2 in values['Validation values']:
+        values['Validation values'][2] = []
+      values['Validation values'][2].append('Numerator') 
       values['Validation comments'].append('Numerator has no formula.')
 
     # get the denominator formula
@@ -338,17 +355,24 @@ class dhisParser():
       denominator = indicator_json['denominator']
     else:
       values['Definition validation code'] |= 2
+      if not 2 in values['Validation values']:
+        values['Validation values'][2] = []
+      values['Validation values'][2].append('Denominator') 
       values['Validation comments'].append('Denominator has no formula.')
     if (denominator == '1') ^ (values['Denominator description'] == '1'):
       values['Definition validation code'] |= 1
+      if not 1 in values['Validation values']:
+        values['Validation values'][1] = []
+      values['Validation values'][1].append('Denominator') 
       values['Validation comments'].append(
         'Denominator formula does not match description.')
 
-    # parse the numerator and denominator dataElement formulas to English
-    # 	all possible elements: ([#ACDIR]|OUG){xxxxxx}, sometimes 
+    # parse the numerator and denominator formulas to English.
+    # all possible elements: ([#ACDIR]|OUG){xxxxxx}, sometimes 
     #   ([#ACDIR]|OUG){xxxxx.xxxxx}, operators (+,-,*), and numbers (int).
-    #   create a list of id's, navigate to their url, and replace the num/den
-    #   id's with the descriptions
+    # see https://docs.dhis2.org/master/en/developer/html/webapi_indicators.html
+    # create a list of id's, navigate to their url, and replace the num/den
+    #   id's with the descriptions.
     vbl_prefix_regex = '(?:[#ACDIR]|OUG)'
     vbl_regex = '(' + vbl_prefix_regex +\
                 '\{([\w|\*]*)\.?([\w|\*]*)\.?([\w|\*]*)\})'
@@ -378,6 +402,9 @@ class dhisParser():
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
+            if not elt_vcode in values['Validation values']:
+              values['Validation values'][elt_vcode] = []
+            values['Validation values'][elt_vcode].append(elements.group(2)) 
             vcomment = 'dataElement ' + elements.group(2) +\
               ' in numerator formula is not well defined - '
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
@@ -393,6 +420,9 @@ class dhisParser():
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
               values['Definition validation code'] |= 1 | coc_vcode
+              if not coc_vcode in values['Validation values']:
+                values['Validation values'][coc_vcode] = []
+              values['Validation values'][coc_vcode].append(acOC) 
               vcomment = 'attribute/categoryOptionCombo ' + acOC +\
                 ' in numerator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
@@ -400,6 +430,10 @@ class dhisParser():
               values['Validation comments'].append(vcomment)
 
     if not numerator_number_seen:
+      values['Definition validation code'] |= 1
+      if not 1 in values['Validation values']:
+        values['Validation values'][1] = []
+      values['Validation values'][1].extend(['Numerator', numerator_number]) 
       values['Validation comments'].append(
         'The numerator description contains a number (' +
         str(numerator_number) +
@@ -421,6 +455,9 @@ class dhisParser():
           values['Calculation'] += ' ' + (data_elt_name or '??????')
           if elt_vcode:
             values['Definition validation code'] |= 1 | elt_vcode
+            if not elt_vcode in values['Validation values']:
+              values['Validation values'][elt_vcode] = []
+            values['Validation values'][elt_vcode].append(elements.group(2)) 
             vcomment = 'dataElement ' + elements.group(2) +\
               ' in denominator formula is not well defined - '
             vcomment += ('has no registry entry.' if elt_vcode == 16 else \
@@ -435,6 +472,9 @@ class dhisParser():
             coc_name, coc_vcode = self.getElementName(acOC)
             values['Calculation'] += ' ' + (coc_name or '??????')
             if coc_vcode:
+              if not coc_vcode in values['Validation values']:
+                values['Validation values'][coc_vcode] = []
+              values['Validation values'][coc_vcode].append(acOC) 
               vcomment = 'categoryOptionCombo ' + acOC +\
                 ' in denominator formula is not well defined - '
               vcomment += ('has no registry entry.' if elt_vcode == 16 else \
@@ -444,6 +484,10 @@ class dhisParser():
     values['Calculation'] += ' }'
 
     if not denominator_number_seen:
+      values['Definition validation code'] |= 1
+      if not 1 in values['Validation values']:
+        values['Validation values'][1] = []
+      values['Validation values'][1].extend(['Denominator', numerator_number]) 
       values['Validation comments'].append(
         'The denominator description contains a number (' +
         str(denominator_number) +
