@@ -1,4 +1,2 @@
-*.xml
-*.json
 .env
-*.csv
+
