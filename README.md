@@ -1,3 +1,5 @@
+Python script for ingesting DHIS2 metadata and performing basic sanity-checking
+
 Usage: "python ./readindicators.py [--args] > output_file"
 Requires Python 3.
 
