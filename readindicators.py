@@ -76,14 +76,6 @@ try:
 except:
   print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
 
-
-def translate_err_code(input_errcode):
-  outputs = []
-  for errcode, error in validation_errcodes:
-    if (errcode & input_errcode):
-      outputs.append(error)
-  return ' & '.join(outputs) | 'valid'
-
   
 # constructs the url the given data - inputs are the element type, id, and name.
 def construct_display_url(base_url, element_type, element_id, friendly_name):
@@ -124,6 +116,14 @@ def get_group_ids_from_group_desc(auth_dict, group_desc):
       group_ids.append(indicator_group['id'])
 
   return group_ids
+
+
+# Takes in a string, depluralizes it (English-only)
+def deplural(in_string):
+  if not in_string: return ''
+  if in_string[-1] == 's' and in_string[-2] != 's':
+    return in_string[:-1]
+  else: return in_string
 
   
 # Takes in a dict, list, string, or number.  For a dict will take keys written
@@ -217,42 +217,50 @@ class DHIS2Parser():
     url = self.auth['baseUrl'] + '/api/identifiableObjects/' + element_id
     idobj_metadata = get_authorized_json(self.auth, url)
     if not idobj_metadata:
-      return None, ValidationErrCode.VBL_NOT_IN_REG
+      return None, ValidationErrCode.VBL_NOT_IN_REG, None
     elt_type = idobj_metadata['href'].split('/')[-2]
     md_url = self.auth['baseUrl'] + '/api/' + elt_type + '/' + element_id
     
-    return get_authorized_json(self.auth, md_url), ValidationErrCode.NO_ERRORS
+    return get_authorized_json(self.auth, md_url), \
+      ValidationErrCode.NO_ERRORS, elt_type
     
   def _get_known_type_metadata(self, element_id, element_type):
     url = self.auth['baseUrl'] + '/api/' + element_type + '/' + element_id
-    return get_authorized_json(self.auth, url), ValidationErrCode.NO_ERRORS
+    return get_authorized_json(self.auth, url), \
+      ValidationErrCode.NO_ERRORS, element_type
 
   # This is the only place where we can get a race condition; indicator ids
   # will only show up once in the list of element ids and so we will query
   # their metadata exactly once. Data element ids however can show up in
   # the metadata of multiple indicators, so we need to be sure we only
   # query their metadata once.
-  def _get_element_name(self, vbl_id):
+  def _get_variable_name(self, vbl_id):
     if vbl_id in self.vbl_names:
       return self.vbl_names[vbl_id]
 
-    vbl_json, valid_code = \
+    vbl_json, valid_code, vbl_type = \
       self._get_known_type_metadata(vbl_id, self.element_type) \
       if vbl_id in self.element_ids \
       else self._get_unknown_type_metadata(vbl_id)
+    vbl_type = deplural(vbl_type)
+
     # If the validation error is that the field is not in the registry, we want
     # that error (16) to get passed through -- if the error is that the field is
     # in the registry but the metadata is not there, we want to return error (8)
     if not vbl_json:
       if valid_code == ValidationErrCode.NO_ERRORS:
         valid_code = ValidationErrCode.VBL_NO_METADATA
-      self.vbl_names[vbl_id] = [None, valid_code]
+      self.vbl_names[vbl_id] = [None, valid_code, vbl_type]
       return self.vbl_names[vbl_id]
     d_name = vbl_json['displayName']
     if not d_name:
-      self.vbl_names[vbl_id] = [None, ValidationErrCode.VBL_NO_METADATA]
+      self.vbl_names[vbl_id] = [
+        None, ValidationErrCode.VBL_NO_METADATA, vbl_type
+      ]
     else:
-      self.vbl_names[vbl_id] = [d_name, ValidationErrCode.NO_ERRORS]    
+      self.vbl_names[vbl_id] = [
+        d_name, ValidationErrCode.NO_ERRORS, vbl_type
+      ]
 
     return self.vbl_names[vbl_id] 
 
@@ -302,40 +310,46 @@ class DHIS2Parser():
           number_seen = True
       else:
         elements = re.match(vbl_regex, term.group(0))
+        # Our variable naming convention assumes we are dealing with a variable
+        # of type #{dataElement.categoryOptionCombo.attributeOptionCombo}.
+        # Our _logic_, however, will work with all indicator variable types.
         if elements:
-          data_elt_name, elt_vcode = self._get_element_name(elements.group(2))
+          data_elt_name, elt_vcode, elt_type =\
+            self._get_variable_name(elements.group(2))
           calculation += ' ' + (data_elt_name or '??????')
           if not elements.group(2) in vbls_seen: 
             vbls_seen.append(elements.group(2))
             if elt_vcode != ValidationErrCode.NO_ERRORS:
-              # TODO: This implicitly assumes the variable is a dataElement,
-              # i.e. encoded by #{xxxx.xxx.xx}. We need to fix this for other
-              # indicator calcuation elements.
-              vvalues.append(
-                [ elt_vcode, [elements.group(2), 'dataElement', quantity_type] ]
-              )
-          # TODO: categoryOptionCombo always comes before attributeOptionCombo?
+              vvalues.append([
+                elt_vcode,
+                [elements.group(2), elt_type, quantity_type]
+              ])
           if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
-            coc_name, coc_vcode = self._get_element_name(coc)
+            coc_name, coc_vcode, coc_type = self._get_variable_name(coc)
             calculation += ' ' + (coc_name or '??????')
             if not coc in vbls_seen: 
               vbls_seen.append(coc)
               if coc_vcode != ValidationErrCode.NO_ERRORS:
-                # TODO: See above.
                 vvalues.append(
-                  [ coc_vcode, [coc, 'categoryOptionCombo', quantity_type] ]
+                  [ coc_vcode, [coc, coc_type, quantity_type] ]
                 )
           if elements.group(4) and elements.group(4) != '*':
             aoc = elements.group(4)
-            aoc_name, aoc_vcode = self._get_element_name(aoc)
-            calculation += ' ' + (aoc_name or '??????')
-            if not aoc in vbls_seen: 
-              vbls_seen.append(aoc)
-              if aoc_vcode != ValidationErrCode.NO_ERRORS:
-                vvalues.append(
-                  [ aoc_vcode, [aoc, 'attributeOptionCombo', quantity_type] ]
-                )
+            # If elements.group(2) is a dataset, then group(4) could be a metric.
+            # In which case we want to insert it into the calculation as is and
+            # not report an error.
+            if elt_type == 'dataset' and re.match('_', aoc):
+              calculation += ' ' + aoc
+            else:
+              aoc_name, aoc_vcode, aoc_type = self._get_variable_name(aoc)
+              calculation += ' ' + (aoc_name or '??????')
+              if not aoc in vbls_seen: 
+                vbls_seen.append(aoc)
+                if aoc_vcode != ValidationErrCode.NO_ERRORS:
+                  vvalues.append(
+                    [ aoc_vcode, [aoc, aoc_type, quantity_type] ]
+                  )
     if not number_seen:
       vvalues.append(
         [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
@@ -344,8 +358,8 @@ class DHIS2Parser():
     return calculation, vvalues
     
   def _get_indicator_description(self, indicator_id):
-    indicator_json, _ = self._get_known_type_metadata(indicator_id,
-                                                      'indicators');
+    indicator_json, _, _ = self._get_known_type_metadata(indicator_id,
+                                                         'indicators');
  
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
