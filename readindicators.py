@@ -270,7 +270,7 @@ class DHIS2Parser():
       
   # Parses the formula for numerator or denominator, outputs a human-readable
   # calculation and a list of validation "values".
-  def _parse_formula(self, formula, number, quantity_type, flag = False):
+  def _parse_formula(self, formula, number, quantity_type):
     calculation = ''
     vvalues = []
   
@@ -328,7 +328,7 @@ class DHIS2Parser():
               )
     if not number_seen:
       vvalues.append(
-        [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, number] ]
+        [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
       )
 
     return calculation, vvalues
@@ -400,7 +400,7 @@ class DHIS2Parser():
         indicator_number != numerator_number and
         indicator_number != indicator_type_number):
       values['Validation values'].append(
-        [ ValidationErrCode.INDIC_NUMBER_MISSING, [indicator_number] ]
+        [ ValidationErrCode.INDIC_NUMBER_MISSING, [str(indicator_number)] ]
       )
 
     # get the numerator formula
@@ -430,7 +430,7 @@ class DHIS2Parser():
 
     numer_calc, numer_vvalues = self._parse_formula(numerator,
                                                     numerator_number,
-                                                    'numerator', indicator_id == 'UGiO0IWd9fZ')
+                                                    'numerator')
     values['Calculation'] += numer_calc
     values['Validation values'].extend(numer_vvalues)
       
