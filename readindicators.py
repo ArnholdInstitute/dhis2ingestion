@@ -326,30 +326,30 @@ class DHIS2Parser():
               ])
           if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
-            coc_name, coc_vcode, coc_type = self._get_variable_name(coc)
-            calculation += ' ' + (coc_name or '??????')
-            if not coc in vbls_seen: 
-              vbls_seen.append(coc)
-              if coc_vcode != ValidationErrCode.NO_ERRORS:
-                vvalues.append(
-                  [ coc_vcode, [coc, coc_type, quantity_type] ]
-                )
-          if elements.group(4) and elements.group(4) != '*':
-            aoc = elements.group(4)
-            # If elements.group(2) is a dataset, then group(4) could be a metric.
+            # If elements.group(2) is a dataset, then group(3) could be a metric.
             # In which case we want to insert it into the calculation as is and
             # not report an error.
-            if elt_type == 'dataset' and re.match('_', aoc):
-              calculation += ' ' + aoc
+            if elt_type == 'dataSet' and re.search('_', coc):
+              calculation += ' ' + coc
             else:
-              aoc_name, aoc_vcode, aoc_type = self._get_variable_name(aoc)
-              calculation += ' ' + (aoc_name or '??????')
-              if not aoc in vbls_seen: 
-                vbls_seen.append(aoc)
-                if aoc_vcode != ValidationErrCode.NO_ERRORS:
+              coc_name, coc_vcode, coc_type = self._get_variable_name(coc)
+              calculation += ' ' + (coc_name or '??????')
+              if not coc in vbls_seen: 
+                vbls_seen.append(coc)
+                if coc_vcode != ValidationErrCode.NO_ERRORS:
                   vvalues.append(
-                    [ aoc_vcode, [aoc, aoc_type, quantity_type] ]
+                    [ coc_vcode, [coc, coc_type, quantity_type] ]
                   )
+          if elements.group(4) and elements.group(4) != '*':
+            aoc = elements.group(4)
+            aoc_name, aoc_vcode, aoc_type = self._get_variable_name(aoc)
+            calculation += ' ' + (aoc_name or '??????')
+            if not aoc in vbls_seen: 
+              vbls_seen.append(aoc)
+              if aoc_vcode != ValidationErrCode.NO_ERRORS:
+                vvalues.append(
+                  [ aoc_vcode, [aoc, aoc_type, quantity_type] ]
+                )
     if not number_seen:
       vvalues.append(
         [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
