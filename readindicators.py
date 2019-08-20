@@ -273,6 +273,10 @@ class DHIS2Parser():
   def _parse_formula(self, formula, number, quantity_type):
     calculation = ''
     vvalues = []
+    
+    # We are going to want to keep track of variables that show up in a given
+    # formula so that we don't duplicate error messages.
+    vbls_seen = []
   
     # all possible formula terms: ([#ACDIR]|OUG){xxxxxx}, sometimes 
     #   ([#ACDIR]|OUG){xxxxx.xxxxx}, operators (+,-,*), and numbers (int).
@@ -301,31 +305,37 @@ class DHIS2Parser():
         if elements:
           data_elt_name, elt_vcode = self._get_element_name(elements.group(2))
           calculation += ' ' + (data_elt_name or '??????')
-          if elt_vcode != ValidationErrCode.NO_ERRORS:
-            # TODO: This implicitly assumes the variable is a dataElement,
-            # i.e. encoded by #{xxxx.xxx.xx}. We need to fix this for other
-            # indicator calcuation elements.
-            vvalues.append(
-              [ elt_vcode, [elements.group(2), 'dataElement', quantity_type] ]
-            )
+          if not elements.group(2) in vbls_seen: 
+            vbls_seen.append(elements.group(2))
+            if elt_vcode != ValidationErrCode.NO_ERRORS:
+              # TODO: This implicitly assumes the variable is a dataElement,
+              # i.e. encoded by #{xxxx.xxx.xx}. We need to fix this for other
+              # indicator calcuation elements.
+              vvalues.append(
+                [ elt_vcode, [elements.group(2), 'dataElement', quantity_type] ]
+              )
           # TODO: categoryOptionCombo always comes before attributeOptionCombo?
           if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
             coc_name, coc_vcode = self._get_element_name(coc)
             calculation += ' ' + (coc_name or '??????')
-            if coc_vcode != ValidationErrCode.NO_ERRORS:
-              # TODO: See above.
-              vvalues.append(
-                [ coc_vcode, [coc, 'categoryOptionCombo', quantity_type] ]
-              )
+            if not coc in vbls_seen: 
+              vbls_seen.append(coc)
+              if coc_vcode != ValidationErrCode.NO_ERRORS:
+                # TODO: See above.
+                vvalues.append(
+                  [ coc_vcode, [coc, 'categoryOptionCombo', quantity_type] ]
+                )
           if elements.group(4) and elements.group(4) != '*':
             aoc = elements.group(4)
             aoc_name, aoc_vcode = self._get_element_name(aoc)
             calculation += ' ' + (aoc_name or '??????')
-            if aoc_vcode != ValidationErrCode.NO_ERRORS:
-              vvalues.append(
-                [ aoc_vcode, [aoc, 'attributeOptionCombo', quantity_type] ]
-              )
+            if not aoc in vbls_seen: 
+              vbls_seen.append(aoc)
+              if aoc_vcode != ValidationErrCode.NO_ERRORS:
+                vvalues.append(
+                  [ aoc_vcode, [aoc, 'attributeOptionCombo', quantity_type] ]
+                )
     if not number_seen:
       vvalues.append(
         [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
