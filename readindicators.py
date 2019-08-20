@@ -26,8 +26,7 @@ fieldnames = [
   'Indicator name',
   'Numerator description',
   'Denominator description',
-  'Calculation',
-  'Validation comments'
+  'Calculation'
 ]
 
 # Sample error messages for validation.
@@ -133,12 +132,16 @@ def camel_case_keys(value_dict):
   if not type(value_dict) is dict: return value_dict
   output_dict = {}
   for key in value_dict:
-    key_substrings = key.split(' ')
+    key_substrings = str(key).split(' ')
     ccase_key_substrs = list(map(lambda x: x.lower().capitalize(),
                                  key_substrings))
     capital_key = ''.join(ccase_key_substrs)
     camel_case_key = capital_key[:1].lower() + capital_key[1:]
-    output_dict[camel_case_key] = camel_case_keys(value_dict[key])
+    # We want to exclude validation codes from camel-casing
+    if camel_case_key == 'validationCodes':
+      output_dict[camel_case_key] = value_dict[key]
+    else:
+      output_dict[camel_case_key] = camel_case_keys(value_dict[key])
     
   return output_dict
     
@@ -243,12 +246,14 @@ class DHIS2Parser():
     if not vbl_json:
       if valid_code == ValidationErrCode.NO_ERRORS:
         valid_code = ValidationErrCode.VBL_NO_METADATA
-      return None, valid_code
+      self.vbl_names[vbl_id] = [None, valid_code]
+      return self.vbl_names[vbl_id]
     d_name = vbl_json['displayName']
     if not d_name:
       self.vbl_names[vbl_id] = [None, ValidationErrCode.VBL_NO_METADATA]
+    else:
+      self.vbl_names[vbl_id] = [d_name, ValidationErrCode.NO_ERRORS]    
 
-    self.vbl_names[vbl_id] = [d_name, ValidationErrCode.NO_ERRORS]
     return self.vbl_names[vbl_id] 
 
   # Parses the display description of an indicator, numerator, or denominator
@@ -265,7 +270,7 @@ class DHIS2Parser():
       
   # Parses the formula for numerator or denominator, outputs a human-readable
   # calculation and a list of validation "values".
-  def _parse_formula(self, formula, number, quantity_type):
+  def _parse_formula(self, formula, number, quantity_type, flag = False):
     calculation = ''
     vvalues = []
   
@@ -296,13 +301,14 @@ class DHIS2Parser():
         if elements:
           data_elt_name, elt_vcode = self._get_element_name(elements.group(2))
           calculation += ' ' + (data_elt_name or '??????')
-          if elt_vcode:
+          if elt_vcode != ValidationErrCode.NO_ERRORS:
             # TODO: This implicitly assumes the variable is a dataElement,
             # i.e. encoded by #{xxxx.xxx.xx}. We need to fix this for other
             # indicator calcuation elements.
             vvalues.append(
               [ elt_vcode, [elements.group(2), 'dataElement', quantity_type] ]
             )
+          # TODO: categoryOptionCombo always comes before attributeOptionCombo?
           if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
             coc_name, coc_vcode = self._get_element_name(coc)
@@ -321,7 +327,7 @@ class DHIS2Parser():
                 [ aoc_vcode, [aoc, 'attributeOptionCombo', quantity_type] ]
               )
     if not number_seen:
-      vvalues['Validation values'].append(
+      vvalues.append(
         [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, number] ]
       )
 
@@ -330,7 +336,7 @@ class DHIS2Parser():
   def _get_indicator_description(self, indicator_id):
     indicator_json, _ = self._get_known_type_metadata(indicator_id,
                                                       'indicators');
-  
+ 
     # create dictionary of values to write into csv file
     values = { key: '' for key in fieldnames }
     values['Validation values'] = []
@@ -424,10 +430,10 @@ class DHIS2Parser():
 
     numer_calc, numer_vvalues = self._parse_formula(numerator,
                                                     numerator_number,
-                                                    'numerator')
+                                                    'numerator', indicator_id == 'UGiO0IWd9fZ')
     values['Calculation'] += numer_calc
     values['Validation values'].extend(numer_vvalues)
-        
+      
     values['Calculation'] += ' } / {'
 
     denom_calc, denom_vvalues = self._parse_formula(denominator,
@@ -437,13 +443,13 @@ class DHIS2Parser():
     values['Validation values'].extend(denom_vvalues)
 
     values['Calculation'] += ' }'
-    
+
     return values
     
   def add_desc_to_dict(self, indicator_id):
     if indicator_id in self.indic_to_desc: return
     self.indic_to_desc[indicator_id] =\
-      self.get_indicator_description(indicator_id)
+      self._get_indicator_description(indicator_id)
     return
     
   def output_all_indicators(self):
@@ -491,7 +497,7 @@ def main(args):
       print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
 
   if output_format == 'csv':
-    print(','.join(fieldnames))
+    print(','.join(fieldnames) + ',Validation Comments')
     for value in output_values:
       line = ''
       if 'Validation values' in value:
@@ -504,19 +510,20 @@ def main(args):
         value['Indicator name'] = value['Display Url']
       for field in fieldnames:
         line += (value[field] or '') + ','
-      print(line[:-1])
+      line += value['Validation comments']
+      print(line)
   elif output_format == 'json':
     indicator_groups = {}
     for value in output_values:
       del value['Display Url']
       value['Validation codes'] = {}
       for code in value['Validation values']:
-        if not code[0].index in value['Validation codes']:
-          value['Validation codes'][code[0].index] = []
-        value['Validation codes'][code[0].index].append(code[1])
+        if not code[0].name in value['Validation codes']:
+          value['Validation codes'][code[0].name] = []
+        value['Validation codes'][code[0].name].append(code[1])
       del value['Validation values']
       if len(value['Validation codes']) == 0:
-        value['Validation codes'] = { ValidationErrCode.NO_ERRORS.index }
+        value['Validation codes'] = { ValidationErrCode.NO_ERRORS.name: [] }
       igroup = value['Group Description']
       del value['Group Description']
       if not igroup in indicator_groups:
@@ -529,10 +536,7 @@ def main(args):
         'indicators': indicator_groups[igroup] })
     vcode_dict = {}
     for name, member in ValidationErrCode.__members__.items():
-      vcode_dict[member.index] = {
-        'name': name, 
-        'engErrMsgTemplate': member.eng_errmsg_template
-      }
+      vcode_dict[name] = member.eng_errmsg_template
     print(json.dumps(
             { 'indicatorGroups': final_output_vals, 
               'validationCodeDict': vcode_dict
