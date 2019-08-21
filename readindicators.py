@@ -408,6 +408,7 @@ class DHIS2Parser():
       if it_id in self.indicator_type_map:
         indicator_type_number = self.indicator_type_map[it_id]
     indicator_number = extract_numerical_factor(display_name, True)
+    if indicator_number == 1: indicator_number = None
 
     values['Indicator name'] = display_name
     values['Indicator Url'], values['Display Url'] =\
