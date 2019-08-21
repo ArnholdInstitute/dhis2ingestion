@@ -47,8 +47,8 @@ class ValidationErrCode(Enum):
                               ' type'), 1)
   FORMULA_NUMBER_MISSING = (9, ('___ description contains a number (___)'
                               ' which does not appear in the formula'), 2)
-  VBL_NOT_IN_REG = (10, ('Variable ___ of type ___ appearing in the formula for'
-                         ' ___ is not in the registry'), 3)
+  VBL_NOT_IN_REG = (10, ('Variable ___ appearing in the formula for ___ is not'
+                         ' in the registry'), 2)
   VBL_NO_METADATA = (11, ('Variable ___ of type ___ appearing in the formula'
                           ' for ___ has no valid metadata'), 3)
 
@@ -216,7 +216,7 @@ class DHIS2Parser():
   def _get_unknown_type_metadata(self, element_id):
     url = self.auth['baseUrl'] + '/api/identifiableObjects/' + element_id
     idobj_metadata = get_authorized_json(self.auth, url)
-    if not idobj_metadata:
+    if not idobj_metadata or 'href' not in idobj_metadata:
       return None, ValidationErrCode.VBL_NOT_IN_REG, None
     elt_type = idobj_metadata['href'].split('/')[-2]
     md_url = self.auth['baseUrl'] + '/api/' + elt_type + '/' + element_id
@@ -317,13 +317,12 @@ class DHIS2Parser():
           data_elt_name, elt_vcode, elt_type =\
             self._get_variable_name(elements.group(2))
           calculation += ' ' + (data_elt_name or '??????')
-          if not elements.group(2) in vbls_seen: 
+          if not elements.group(2) in vbls_seen:
             vbls_seen.append(elements.group(2))
             if elt_vcode != ValidationErrCode.NO_ERRORS:
-              vvalues.append([
-                elt_vcode,
-                [elements.group(2), elt_type, quantity_type]
-              ])
+              elt_vvalues = [elements.group(2), elt_type, quantity_type] \
+                if elt_type else [elements.group(2), quantity_type]
+              vvalues.append([ elt_vcode, elt_vvalues ])
           if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
             # If elements.group(2) is a dataset, then group(3) could be a metric.
@@ -337,9 +336,9 @@ class DHIS2Parser():
               if not coc in vbls_seen: 
                 vbls_seen.append(coc)
                 if coc_vcode != ValidationErrCode.NO_ERRORS:
-                  vvalues.append(
-                    [ coc_vcode, [coc, coc_type, quantity_type] ]
-                  )
+                  coc_vvalues = [coc, coc_type, quantity_type] if coc_type \
+                    else [coc, quantity_type]
+                  vvalues.append([ coc_vcode, coc_vvalues ])
           if elements.group(4) and elements.group(4) != '*':
             aoc = elements.group(4)
             aoc_name, aoc_vcode, aoc_type = self._get_variable_name(aoc)
@@ -347,9 +346,9 @@ class DHIS2Parser():
             if not aoc in vbls_seen: 
               vbls_seen.append(aoc)
               if aoc_vcode != ValidationErrCode.NO_ERRORS:
-                vvalues.append(
-                  [ aoc_vcode, [aoc, aoc_type, quantity_type] ]
-                )
+                aoc_vvalues = [aoc, aoc_type, quantity_type] if aoc_type \
+                  else [aoc, quantity_type]
+                vvalues.append([ aoc_vcode, aoc_vvalues ])
     if not number_seen:
       vvalues.append(
         [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
