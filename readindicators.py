@@ -144,7 +144,44 @@ def camel_case_keys(value_dict):
       output_dict[camel_case_key] = camel_case_keys(value_dict[key])
     
   return output_dict
-    
+
+# Extracts a numerical factor from display text.
+# TODO: More intelligent parsing
+#   1) multiple languages
+#   2) figure out what to do about American/European difference in definition
+#      of million, billion etc.
+#   3) Generally improve i18n
+def extract_numerical_factor(display_text, is_multiplicative=False):
+  factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
+                  'million': 1000000, 'billion': 1000000000, 'percent': 100 }
+  factor_regex = '(?:^|\s)(' + '|'.join(factor_dict.keys()) + ')(?:\s|$)'
+  
+  # If we are looking for a multiplicative factor, we either want 'per 1000'
+  # or '* 1000' or '1000 *', for example. Only relevant to display text for
+  # indicators/numerators/denominators -- generally not relevant to 
+  # indicatorType display text.
+  number_regex = '(?:pour|per|par|[\*\/])(\d+)|(\d+)\*' if is_multiplicative \
+    else '(\d+)'
+  number_match = re.search(number_regex, re.sub('\s', '', display_text))
+  if number_match:
+    number = int(number_match.group(1)) if len(number_match.groups()) < 3 else \
+      int(number_match.group(1) or number_match.group(2))
+    return number
+
+  # Bit of a cheaty way of capturing "per thousand", "per ten thousand", and
+  # "per ten-thousand". Might be better to do a split on [_\W], and match
+  # against the keys. TODO?
+  factor_match = re.search(factor_regex,
+                           re.sub('\s|\-', '  ', display_text))
+  if factor_match:
+    number = 1
+    for factor in re.finditer(factor_regex,
+                              re.sub('\s|\-', '  ', display_text)):
+      number *= factor_dict[factor.group(1)]
+    return number
+
+  return None
+
           
 class DHIS2Parser():
   """ A class to parse DHIS2 system metadata for indicatorGroups.
@@ -181,18 +218,10 @@ class DHIS2Parser():
       if 'factor' in parsed_metadata:
         self.indicator_type_map[indic_type['id']] = parsed_metadata['factor']
       else:
-        number_match = re.search('(\d+)', indic_type['displayName'])
-        if number_match:
-          self.indicator_type_map[indic_type['id']] = number_match.group(0)
-        else:
-          # Default to 1
+        number = extract_numerical_factor(indic_type['displayName'], False)
+        if not number:
           number = 1
-          factor_match = re.finditer(
-            factor_regex, re.sub('\s', '', indic_type['displayName'])
-          )
-          for factor in factor_match:
-            number *= factor_dict[factor.group(1)]
-          self.indicator_type_map[indic_type['id']] = number
+        self.indicator_type_map[indic_type['id']] = number
     
   # group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
   def set_group_id(self, group_id):
@@ -267,31 +296,7 @@ class DHIS2Parser():
       [ None, ValidationErrCode.VBL_NO_METADATA, vbl_type ]
 
     return self.vbl_names[vbl_id] 
-
-  # Parses the display description of an indicator, numerator, or denominator
-  # to get any numbers listed as multiplicative factors.
-  # TODO: More intelligent parsing; figure out what to do about American/European
-  # difference in definition of million, billion etc.
-  def _get_display_number(self, display_desc):
-    # TODO: add alternate languages?
-    factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
-                    'million': 1000000, 'billion': 1000000000, 'cent': 100 }
-    factor_regex = '(' + '|'.join(factor_dict.keys()) + ')'
-    display_number_regex = '(?:pour|per|par|[\*\/])(\d+)|(\d+)\*'
-    number_match = re.search(display_number_regex, 
-                             re.sub('\s', '', display_desc))
-    factor_match = re.search(factor_regex, re.sub('\s', '', display_desc))
-    if number_match:
-      number = int(number_match.group(1) or number_match.group(2))
-      return number
-    elif factor_match:
-      number = 1
-      for factor in re.finditer(factor_regex, re.sub('\s', '', display_desc)):
-        number *= factor_dict[factor.group(1)]
-      return number
-    else:
-      return None
-      
+     
   # Parses the formula for numerator or denominator, outputs a human-readable
   # calculation and a list of validation "values".
   def _parse_formula(self, formula, number, quantity_type):
@@ -402,7 +407,7 @@ class DHIS2Parser():
       it_id = indicator_json['indicatorType']['id']
       if it_id in self.indicator_type_map:
         indicator_type_number = self.indicator_type_map[it_id]
-    indicator_number = self._get_display_number(display_name)
+    indicator_number = extract_numerical_factor(display_name, True)
 
     values['Indicator name'] = display_name
     values['Indicator Url'], values['Display Url'] =\
@@ -418,7 +423,9 @@ class DHIS2Parser():
     else:
       values['Validation values'].append([ValidationErrCode.NUMER_NO_DESC, []])
 
-    numerator_number = self._get_display_number(values['Numerator description'])
+    numerator_number = extract_numerical_factor(
+      values['Numerator description'], True
+    )
       
     # store the denominator description
     values['Denominator description'] = '1'
@@ -429,8 +436,8 @@ class DHIS2Parser():
     else:
       values['Validation values'].append([ValidationErrCode.DENOM_NO_DESC, []])
         
-    denominator_number = self._get_display_number(
-      values['Denominator description']
+    denominator_number = extract_numerical_factor(
+      values['Denominator description'], True
     )
     if denominator_number == 1:
       denominator_number = None
