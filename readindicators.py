@@ -162,7 +162,7 @@ def extract_numerical_factor(display_text, is_multiplicative=False):
   # indicatorType display text.
   number_regex = '(?:pour|per|par|[\*\/])(\d+)|(\d+)\*' if is_multiplicative \
     else '(\d+)'
-  number_match = re.search(number_regex, re.sub('\s', '', display_text))
+  number_match = re.search(number_regex, re.sub('\s|,', '', display_text))
   if number_match:
     number = int(number_match.group(1)) if len(number_match.groups()) < 3 else \
       int(number_match.group(1) or number_match.group(2))
