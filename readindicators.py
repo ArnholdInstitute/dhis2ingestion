@@ -476,7 +476,8 @@ class DHIS2Parser():
     if denominator_number == 1:
       denominator_number = None
 
-    if (indicator_number and indicator_number != denominator_number and
+    if (indicator_number and
+        indicator_number != denominator_number and
         indicator_number != numerator_number and
         indicator_number != indicator_type_number):
       values['Validation values'].append(
