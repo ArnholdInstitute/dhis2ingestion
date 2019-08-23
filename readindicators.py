@@ -226,11 +226,6 @@ class DHIS2Parser():
     it_url = self._auth['baseUrl'] + '/api/indicatorTypes'
     it_metadata = get_authorized_json(self._auth, it_url)
 
-    # TODO: add alternate languages
-    factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
-                    'million': 1000000, 'billion': 1000000000, 'cent': 100 }
-    factor_regex = '(' + '|'.join(factor_dict.keys()) + ')'
-
     if not 'indicatorTypes' in indic_type:
       raise ValueError('DHIS2 system misconfigured? Missing indicatorTypes')
 
