@@ -29,7 +29,7 @@ fieldnames = [
   'Calculation'
 ]
 
-# Sample error messages for validation.
+# Error messages for validation.
 # English language messages are provided as a template;
 #  output will be message id and fields for the fill-in-the-blanks.
 class ValidationErrCode(Enum):
@@ -51,6 +51,7 @@ class ValidationErrCode(Enum):
                          ' in the registry'), 2)
   VBL_NO_METADATA = (11, ('Variable ___ of type ___ appearing in the formula'
                           ' for ___ has no valid metadata'), 3)
+  INDIC_PARSE_FAILED = (12, ('Parsing of indicator ___ failed'), 1)
 
   def __init__(self, index, eng_errmsg_template, num_blanks):
     self.index = index
@@ -62,7 +63,8 @@ class ValidationErrCode(Enum):
   def eng_errmsg(self, fillin_list):
     if len(fillin_list) != self.num_blanks:
       raise ValueError("Validation error code #" + str(self.index) + " of type "
-                       + self + " takes in " + str(self.num_blanks) + " values")
+                       + self.name + " takes in " + str(self.num_blanks) +\
+                       " values")
     errmsg = self.eng_errmsg_template
     for i in range(self.num_blanks):
       errmsg = re.sub('___', str(fillin_list[i]), errmsg)
@@ -508,7 +510,12 @@ class DHIS2Parser():
       executor.map(self.add_desc_to_dict, self.element_ids)
       
     for indicator_id in self.element_ids:
-      tmp_desc = self.indic_to_desc[indicator_id].copy()
+      tmp_desc = dict(zip(fieldnames, map(lambda x: '', fieldnames)))
+      tmp_desc['Validation values'] = [
+        [ ValidationErrCode.INDIC_PARSE_FAILED, [indicator_id] ]
+      ]
+      if indicator_id in self.indic_to_desc:
+        tmp_desc = self.indic_to_desc[indicator_id].copy()
       tmp_desc['Group Description'] = self.group_desc
       output_values.append(tmp_desc)
       
