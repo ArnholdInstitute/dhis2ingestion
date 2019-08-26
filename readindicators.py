@@ -81,21 +81,15 @@ except:
   print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
 
   
-# constructs the url the given data - inputs are the element type, id, and name.
+# constructs the URL the given data - inputs are the element type, id, and name.
+# provides both "bare" URL and URL encapsulated for Excel/OpenOffice display.
 def construct_display_url(base_url, element_type, element_id, friendly_name):
   output_url = 'https://' + base_url + '/api/' + element_type + '/' + element_id
   display_url = '=HYPERLINK(\"' + output_url + '\";\"' + friendly_name + '\")'
   return output_url, display_url
 
 
-# This returns a pair [full_login_url, display_url]; the former has username/
-# password inherent in it and is never put into output.
-def construct_dhis_urls(auth_dict):
-  return ['https://' + auth_dict['username'] + ':' + auth_dict['password'] +
-            '@' + auth_dict['baseUrl'],
-          'https://' + auth_dict[country]['baseUrl']]
-
-
+# Given authorization and an API URI/URL, retrieves JSON from the URL.
 def get_authorized_json(auth_dict, url):
   result = { 'text' : None }
   if 'token' in auth_dict:
@@ -182,10 +176,8 @@ def extract_numerical_factor(display_text, is_multiplicative=False):
 
   # Bit of a cheaty way of capturing "per thousand", "per ten thousand", and
   # "per ten-thousand". Might be better to do a split on [_\W], and match
-  # against the keys. TODO?
-  factor_match = re.search(factor_regex,
-                           re.sub('\s|\-', '  ', display_text))
-  if factor_match:
+  # against the keys. TODO?                        
+  if re.search(factor_regex, re.sub('\s|\-', '  ', display_text)):
     number = 1
     for factor in re.finditer(factor_regex,
                               re.sub('\s|\-', '  ', display_text)):
@@ -216,7 +208,7 @@ class DHIS2Parser():
     self._indicator_type_map = {}       # Maps indicatorType id to a number.
     
     try:
-      self._get_indicator_type_map()      # Populates above map.
+      self._get_indicator_type_map()    # Populates above map.
     except err:
       raise
     
@@ -266,9 +258,9 @@ class DHIS2Parser():
     group_metadata = get_authorized_json(self._auth, group_url)
 
     if not 'displayName' in group_metadata:
-      raise ValueError(
-        'Group id ' + self.group + ' does not have valid metadata'
-      )
+      errmsg = 'Group id ' + self.group + ' does not have valid metadata'
+      print(errmsg, file=sys.stderr)
+      raise ValueError(errmsg)
     self.group_desc = group_metadata['displayName']
     
     self._element_type = re.sub('Group', '', group_type, re.IGNORECASE)
@@ -571,20 +563,33 @@ def main(args):
   if args.auth_token:
     auth['token'] = args.auth_token
 
-  dhis_parser = DHIS2Parser(auth)
+  dhis_parser = None
+  try:
+    dhis_parser = DHIS2Parser(auth)
+  except err:
+    print(err.msg, file=sys.stderr)
+    print(json.dumps({ 'status': 500, 'error': err.msg }))
+    return
 
   group_ids = []
   if args.group_ids:
     group_ids = args.group_ids.split(',')
   elif args.group_desc:
     group_ids = get_group_ids_from_group_desc(auth, args.group_desc)
-    
+
+  # The run will continue even with bad group_ids.
+  # TODO: Figure out how to add the error messages to the JSON output.
   for group_id in group_ids:
     try:
       dhis_parser.set_group_id(group_id)
+    except err:
+      print(err.msg, file=sys.stderr)
+      continue
+    try:
       output_values += dhis_parser.output_all_indicators()
     except:
-      print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
+      print('Failed to output indicators for group id {}'.format(group_id),
+            file=sys.stderr)
 
   if output_format == 'csv':
     print(','.join(fieldnames) + ',Validation Comments')
@@ -632,6 +637,7 @@ def main(args):
               'validationCodeDict': vcode_dict
             }, indent=4, sort_keys=True)
          )
+
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
