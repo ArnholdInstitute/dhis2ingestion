@@ -124,7 +124,7 @@ def get_group_ids_from_group_desc(auth_dict, group_desc):
 
 # Takes in a string, depluralizes it (English-only)
 def deplural(in_string):
-  if not in_string or not type(in_string) is string: return ''
+  if not in_string or not type(in_string) is str: return ''
   if in_string[-1] == 's' and in_string[-2] != 's':
     return in_string[:-1]
   else: return in_string
@@ -304,7 +304,7 @@ class DHIS2Parser():
       if vbl_id in self._element_ids \
       else self._get_unknown_type_metadata(vbl_id)
     vbl_type = deplural(vbl_type)
-
+    
     # If the validation error is that the field is not in the registry, we want
     # that error (16) to get passed through -- if the error is that the field is
     # in the registry but the metadata is not there, we want to return error (8)
@@ -369,7 +369,7 @@ class DHIS2Parser():
               elt_vvalues = [elements.group(2), elt_type, quantity_type] \
                 if elt_type else [elements.group(2), quantity_type]
               vvalues.append([ elt_vcode, elt_vvalues ])
-          if elements.group(3) and elements.group(3) != '*':
+          if elements.group(3) and elements.group(3) != '*':          
             coc = elements.group(3)
             # If elements.group(2) is a dataset, then group(3) could be a metric.
             # In which case we want to insert it into the calculation as is and
@@ -512,7 +512,7 @@ class DHIS2Parser():
                                                     'numerator')
     values['Calculation'] += numer_calc
     values['Validation values'].extend(numer_vvalues)
-      
+
     values['Calculation'] += ' } / {'
 
     denom_calc, denom_vvalues = self._parse_formula(denominator,
@@ -539,13 +539,13 @@ class DHIS2Parser():
     with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
       executor.map(self._add_desc_to_dict, self._element_ids)
       
-    for indicator_id in self.element_ids:
+    for indicator_id in self._element_ids:
       tmp_desc = dict(zip(fieldnames, map(lambda x: '', fieldnames)))
       tmp_desc['Validation values'] = [
         [ ValidationErrCode.INDIC_PARSE_FAILED, [indicator_id] ]
       ]
-      if indicator_id in self.indic_to_desc:
-        tmp_desc = self.indic_to_desc[indicator_id].copy()
+      if indicator_id in self._indic_to_desc:
+        tmp_desc = self._indic_to_desc[indicator_id].copy()
       tmp_desc['Group Description'] = self.group_desc
       output_values.append(tmp_desc)
       
@@ -612,20 +612,23 @@ def main(args):
   elif output_format == 'json':
     indicator_groups = {}
     for value in output_values:
-      del value['Display Url']
+      if 'Display Url' in value:
+        del value['Display Url']
       value['Validation codes'] = {}
-      for code in value['Validation values']:
-        if not code[0].name in value['Validation codes']:
-          value['Validation codes'][code[0].name] = []
-        value['Validation codes'][code[0].name].append(code[1])
-      del value['Validation values']
+      if 'Validation values' in value:
+        for code in value['Validation values']:
+          if not code[0].name in value['Validation codes']:
+            value['Validation codes'][code[0].name] = []
+          value['Validation codes'][code[0].name].append(code[1])
+        del value['Validation values']
       if len(value['Validation codes']) == 0:
         value['Validation codes'] = { ValidationErrCode.NO_ERRORS.name: [] }
-      igroup = value['Group Description']
-      del value['Group Description']
-      if not igroup in indicator_groups:
-        indicator_groups[igroup] = []
-      indicator_groups[igroup].append(camel_case_keys(value))
+      if 'Group Description' in value:
+        igroup = value['Group Description']
+        del value['Group Description']
+        if not igroup in indicator_groups:
+          indicator_groups[igroup] = []
+        indicator_groups[igroup].append(camel_case_keys(value))
 
     final_output_vals = []
     for igroup in indicator_groups:
