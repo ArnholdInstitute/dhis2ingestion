@@ -209,7 +209,7 @@ class DHIS2Parser():
     
     try:
       self._get_indicator_type_map()    # Populates above map.
-    except err:
+    except:
       raise
     
   # Indicator types are e.g. "number", "percent", "per thousand";
@@ -566,7 +566,7 @@ def main(args):
   dhis_parser = None
   try:
     dhis_parser = DHIS2Parser(auth)
-  except err:
+  except ValueError as err:
     print(err.msg, file=sys.stderr)
     print(json.dumps({ 'status': 500, 'error': err.msg }))
     return
@@ -582,7 +582,7 @@ def main(args):
   for group_id in group_ids:
     try:
       dhis_parser.set_group_id(group_id)
-    except err:
+    except ValueError as err:
       print(err.msg, file=sys.stderr)
       continue
     try:
