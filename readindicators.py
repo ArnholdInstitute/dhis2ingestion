@@ -567,8 +567,8 @@ def main(args):
   try:
     dhis_parser = DHIS2Parser(auth)
   except ValueError as err:
-    print(err.message, file=sys.stderr)
-    print(json.dumps({ 'status': 500, 'error': err.message }))
+    print(str(err), file=sys.stderr)
+    print(json.dumps({ 'status': 500, 'error': str(err) }))
     return
 
   group_ids = []
@@ -583,7 +583,7 @@ def main(args):
     try:
       dhis_parser.set_group_id(group_id)
     except ValueError as err:
-      print(err.message, file=sys.stderr)
+      print(str(err), file=sys.stderr)
       continue
     try:
       output_values += dhis_parser.output_all_indicators()
