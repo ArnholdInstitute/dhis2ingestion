@@ -304,7 +304,7 @@ class DHIS2Parser():
       if vbl_id in self._element_ids \
       else self._get_unknown_type_metadata(vbl_id)
     vbl_type = deplural(vbl_type)
-    
+
     # If the validation error is that the field is not in the registry, we want
     # that error (16) to get passed through -- if the error is that the field is
     # in the registry but the metadata is not there, we want to return error (8)
@@ -369,7 +369,7 @@ class DHIS2Parser():
               elt_vvalues = [elements.group(2), elt_type, quantity_type] \
                 if elt_type else [elements.group(2), quantity_type]
               vvalues.append([ elt_vcode, elt_vvalues ])
-          if elements.group(3) and elements.group(3) != '*':          
+          if elements.group(3) and elements.group(3) != '*':
             coc = elements.group(3)
             # If elements.group(2) is a dataset, then group(3) could be a metric.
             # In which case we want to insert it into the calculation as is and
