@@ -218,7 +218,7 @@ class DHIS2Parser():
     it_url = self._auth['baseUrl'] + '/api/indicatorTypes'
     it_metadata = get_authorized_json(self._auth, it_url)
 
-    if not 'indicatorTypes' in indic_type:
+    if not 'indicatorTypes' in it_metadata:
       raise ValueError('DHIS2 system misconfigured? Missing indicatorTypes')
 
     for indic_type in it_metadata['indicatorTypes']:
