@@ -102,7 +102,7 @@ def get_authorized_json(auth_dict, url):
   try:
     return json.loads(result.text)
   except:
-    return json.loads({ 'text' : None })
+    return { 'text' : None }
 
           
 def get_group_ids_from_group_desc(auth_dict, group_desc):
