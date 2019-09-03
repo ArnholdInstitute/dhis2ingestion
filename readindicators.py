@@ -51,7 +51,9 @@ class ValidationErrCode(Enum):
                          ' in the registry'), 2)
   VBL_NO_METADATA = (11, ('Variable ___ of type ___ appearing in the formula'
                           ' for ___ has no valid metadata'), 3)
-  INDIC_PARSE_FAILED = (12, ('Parsing of indicator ___ failed'), 1)
+  NUMER_EQS_DENOM = (12, ('Numerator and denominator have the same formula'), 0)
+  INDIC_PARSE_FAILED = (13, ('Parsing of indicator ___ failed'), 1)
+
 
   def __init__(self, index, eng_errmsg_template, num_blanks):
     self.index = index
@@ -79,21 +81,15 @@ except:
   print("No DHIS2_PARAMS_FILE env variable found", file=sys.stderr)
 
   
-# constructs the url the given data - inputs are the element type, id, and name.
+# constructs the URL the given data - inputs are the element type, id, and name.
+# provides both "bare" URL and URL encapsulated for Excel/OpenOffice display.
 def construct_display_url(base_url, element_type, element_id, friendly_name):
   output_url = 'https://' + base_url + '/api/' + element_type + '/' + element_id
   display_url = '=HYPERLINK(\"' + output_url + '\";\"' + friendly_name + '\")'
   return output_url, display_url
 
 
-# This returns a pair [full_login_url, display_url]; the former has username/
-# password inherent in it and is never put into output.
-def construct_dhis_urls(auth_dict):
-  return ['https://' + auth_dict['username'] + ':' + auth_dict['password'] +
-            '@' + auth_dict['baseUrl'],
-          'https://' + auth_dict[country]['baseUrl']]
-
-
+# Given authorization and an API URI/URL, retrieves JSON from the URL.
 def get_authorized_json(auth_dict, url):
   result = { 'text' : None }
   if 'token' in auth_dict:
@@ -103,26 +99,32 @@ def get_authorized_json(auth_dict, url):
     auth_url = 'https://' + auth_dict['username'] + ':' + auth_dict['password']\
       + '@' + url
     result = requests.get(auth_url)
-  return json.loads(result.text)
+  try:
+    return json.loads(result.text)
+  except:
+    return { 'text' : None }
 
           
 def get_group_ids_from_group_desc(auth_dict, group_desc):
+  if not 'baseUrl' in auth_dict: return []
   groups_url = auth_dict['baseUrl'] + '/api/indicatorGroups.json?paging=false'
   group_list = get_authorized_json(auth_dict, groups_url)
     
   # This contains the parsed JSON DOM of the indicator group list, from which we
   # can match indicator group display names against the group description. 
   group_ids = []
-  for indicator_group in group_list['indicatorGroups']:
-    if re.search(group_desc, indicator_group['displayName'], re.IGNORECASE):
-      group_ids.append(indicator_group['id'])
+  if 'indicatorGroups' in group_list:
+    for indicator_group in group_list['indicatorGroups']:
+      if 'displayName' in indicator_group and \
+        re.search(group_desc, indicator_group['displayName'], re.IGNORECASE):
+        group_ids.append(indicator_group['id'])
 
   return group_ids
 
 
 # Takes in a string, depluralizes it (English-only)
 def deplural(in_string):
-  if not in_string: return ''
+  if not in_string or not type(in_string) is str: return ''
   if in_string[-1] == 's' and in_string[-2] != 's':
     return in_string[:-1]
   else: return in_string
@@ -147,12 +149,14 @@ def camel_case_keys(value_dict):
     
   return output_dict
 
+
 # Extracts a numerical factor from display text.
 # TODO: More intelligent parsing
 #   1) multiple languages
 #   2) figure out what to do about American/European difference in definition
 #      of million, billion etc.
-#   3) Generally improve i18n
+#   3) generally improve i18n
+#   4) handle decimal extraction
 def extract_numerical_factor(display_text, is_multiplicative=False):
   factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
                   'million': 1000000, 'billion': 1000000000, 'percent': 100 }
@@ -172,10 +176,8 @@ def extract_numerical_factor(display_text, is_multiplicative=False):
 
   # Bit of a cheaty way of capturing "per thousand", "per ten thousand", and
   # "per ten-thousand". Might be better to do a split on [_\W], and match
-  # against the keys. TODO?
-  factor_match = re.search(factor_regex,
-                           re.sub('\s|\-', '  ', display_text))
-  if factor_match:
+  # against the keys. TODO?                        
+  if re.search(factor_regex, re.sub('\s|\-', '  ', display_text)):
     number = 1
     for factor in re.finditer(factor_regex,
                               re.sub('\s|\-', '  ', display_text)):
@@ -192,94 +194,114 @@ class DHIS2Parser():
       :param auth_dict: Dictionary of DHIS2 authorization data
   """
   def __init__(self, auth_dict):
-    self.auth = auth_dict               # Stores authorization for DHIS2 instance
-    self.indic_to_desc = {}             # Maps indicator to description
-    self.vbl_names = {}                 # Maps vbl_id to [display name, lookup error code] for all vbls
     self.values = {}                    # Stores output
     self.group = None                   # Stores group id of current group being looked up
     self.group_desc = None              # Stores display name of current group
-    self.element_type = None            # Stores "type" of group elements -- generally indicators
-    self.element_ids = []               # Stores list of group elements in current group
-    self.indicator_type_map = {}        # Maps indicatorType id to a number.
-    self._get_indicator_type_map()      # Populates above map.
+
+    if not 'baseUrl' in auth_dict:
+      raise ValueError('Invalid DHIS2 system URL')
+    self._auth = auth_dict              # Stores authorization for DHIS2 instance
+    self._indic_to_desc = {}            # Maps indicator to description
+    self._vbl_names = {}                # Maps vbl_id to [display name, lookup error code, variable type]
+    self._element_type = None           # Stores "type" of group elements -- generally indicators
+    self._element_ids = []              # Stores list of group elements in current group
+    self._indicator_type_map = {}       # Maps indicatorType id to a number.
+    
+    try:
+      self._get_indicator_type_map()    # Populates above map.
+    except:
+      raise
     
   # Indicator types are e.g. "number", "percent", "per thousand";
   # we want a mapping from indicator type id to numerical factor in the denominator.
   def _get_indicator_type_map(self):
-    it_url = self.auth['baseUrl'] + '/api/indicatorTypes'
-    it_metadata = get_authorized_json(self.auth, it_url)
+    it_url = self._auth['baseUrl'] + '/api/indicatorTypes'
+    it_metadata = get_authorized_json(self._auth, it_url)
 
-    # TODO: add alternate languages
-    factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
-                    'million': 1000000, 'billion': 1000000000, 'cent': 100 }
-    factor_regex = '(' + '|'.join(factor_dict.keys()) + ')'
-    
+    if not it_metadata:
+      raise ValueError('Could not connect to DHIS2 system')
+    if not 'indicatorTypes' in it_metadata:
+      raise ValueError('DHIS2 system misconfigured? Missing indicatorTypes')
+
     for indic_type in it_metadata['indicatorTypes']:
-      md_url = it_url + '/' + indic_type['id']
-      parsed_metadata = get_authorized_json(self.auth, md_url)
-      if 'factor' in parsed_metadata:
-        self.indicator_type_map[indic_type['id']] = parsed_metadata['factor']
-      else:
-        number = extract_numerical_factor(indic_type['displayName'], False)
-        if not number:
+      if 'id' in indic_type:
+        md_url = it_url + '/' + indic_type['id']
+        parsed_metadata = get_authorized_json(self._auth, md_url)
+        if 'factor' in parsed_metadata:
+          self._indicator_type_map[indic_type['id']] = \
+            parsed_metadata['factor']
+        else:
           number = 1
-        self.indicator_type_map[indic_type['id']] = number
+          if 'displayName' in indic_type:
+            number = extract_numerical_factor(indic_type['displayName'],
+                                              False)
+            if not number:
+              number = 1
+          self._indicator_type_map[indic_type['id']] = number
     
   # group_id: DHIS2-internal id of indicatorGroup/dataElementGroup of interest
   def set_group_id(self, group_id):
     self.group = group_id
-    group_metadata_url = self.auth['baseUrl'] + '/api/identifiableObjects/' + self.group
-    parsed_metadata = get_authorized_json(self.auth, group_metadata_url)
+    group_metadata_url = self._auth['baseUrl'] + '/api/identifiableObjects/' +\
+      self.group
+    parsed_metadata = get_authorized_json(self._auth, group_metadata_url)
     
     try:
       group_type = parsed_metadata['href'].split('/')[-2]
     except:
-      print("No valid metadata found for group id {}".format(self.group),
-            file=sys.stderr)
-      raise
-    group_url = self.auth['baseUrl'] + '/api/' + group_type + '/' + self.group
+      errmsg = 'Group id ' + self.group + ' not found in registry'
+      print(errmsg, file=sys.stderr)
+      raise ValueError(errmsg)
+
+    group_url = self._auth['baseUrl'] + '/api/' + group_type + '/' + self.group
     
     # This contains the parsed JSON DOM of the indicator group, from which we
     # can retrieve a list of indicator ids.
-    group_metadata = get_authorized_json(self.auth, group_url)
+    group_metadata = get_authorized_json(self._auth, group_url)
+
+    if not 'displayName' in group_metadata:
+      errmsg = 'Group id ' + self.group + ' does not have valid metadata'
+      print(errmsg, file=sys.stderr)
+      raise ValueError(errmsg)
     self.group_desc = group_metadata['displayName']
     
-    self.element_type = re.sub('Group', '', group_type, re.IGNORECASE)
-    self.element_ids = list(map(lambda x: x['id'],
-                                group_metadata[self.element_type]))
+    self._element_type = re.sub('Group', '', group_type, re.IGNORECASE)
+    self._element_ids = list(map(lambda x: x['id'],
+                                 group_metadata[self._element_type]))
     
   def _construct_element_url(self, element_id):
-    return self.auth['baseUrl'] + '/api/' + self.element_type + '/' + element_id
+    return self._auth['baseUrl'] + '/api/' + self._element_type + '/' +\
+      element_id
 
   # returns a validation warning if the element is not found.
   def _get_unknown_type_metadata(self, element_id):
-    url = self.auth['baseUrl'] + '/api/identifiableObjects/' + element_id
-    idobj_metadata = get_authorized_json(self.auth, url)
+    url = self._auth['baseUrl'] + '/api/identifiableObjects/' + element_id
+    idobj_metadata = get_authorized_json(self._auth, url)
     if not idobj_metadata or 'href' not in idobj_metadata:
       return None, ValidationErrCode.VBL_NOT_IN_REG, None
     elt_type = idobj_metadata['href'].split('/')[-2]
-    md_url = self.auth['baseUrl'] + '/api/' + elt_type + '/' + element_id
+    md_url = self._auth['baseUrl'] + '/api/' + elt_type + '/' + element_id
     
-    return get_authorized_json(self.auth, md_url), \
+    return get_authorized_json(self._auth, md_url), \
       ValidationErrCode.NO_ERRORS, elt_type
     
   def _get_known_type_metadata(self, element_id, element_type):
-    url = self.auth['baseUrl'] + '/api/' + element_type + '/' + element_id
-    return get_authorized_json(self.auth, url), \
+    url = self._auth['baseUrl'] + '/api/' + element_type + '/' + element_id
+    return get_authorized_json(self._auth, url), \
       ValidationErrCode.NO_ERRORS, element_type
 
   # This is the only place where we can get a race condition; indicator ids
   # will only show up once in the list of element ids and so we will query
   # their metadata exactly once. Data element ids however can show up in
-  # the metadata of multiple indicators, so we need to be sure we only
+  # the metadata of multiple indicators, so we'd like to be sure we only
   # query their metadata once.
   def _get_variable_name(self, vbl_id):
-    if vbl_id in self.vbl_names:
-      return self.vbl_names[vbl_id]
+    if vbl_id in self._vbl_names:
+      return self._vbl_names[vbl_id]
 
     vbl_json, valid_code, vbl_type = \
-      self._get_known_type_metadata(vbl_id, self.element_type) \
-      if vbl_id in self.element_ids \
+      self._get_known_type_metadata(vbl_id, self._element_type) \
+      if vbl_id in self._element_ids \
       else self._get_unknown_type_metadata(vbl_id)
     vbl_type = deplural(vbl_type)
 
@@ -289,15 +311,16 @@ class DHIS2Parser():
     if not vbl_json:
       if valid_code == ValidationErrCode.NO_ERRORS:
         valid_code = ValidationErrCode.VBL_NO_METADATA
-      self.vbl_names[vbl_id] = [None, valid_code, vbl_type]
-      return self.vbl_names[vbl_id]
-    d_name = vbl_json['displayName']
-    self.vbl_names[vbl_id] = \
-      [ d_name, ValidationErrCode.NO_ERRORS, vbl_type ] \
-      if d_name else \
-      [ None, ValidationErrCode.VBL_NO_METADATA, vbl_type ]
+      self._vbl_names[vbl_id] = [None, valid_code, vbl_type]
+      return self._vbl_names[vbl_id]
+    if 'displayName' in vbl_json and vbl_json['displayName']:
+      self._vbl_names[vbl_id] = \
+        [ vbl_json['displayName'], ValidationErrCode.NO_ERRORS, vbl_type ]
+    else:
+      self._vbl_names[vbl_id] = \
+        [ None, ValidationErrCode.VBL_NO_METADATA, vbl_type ]
 
-    return self.vbl_names[vbl_id] 
+    return self._vbl_names[vbl_id] 
      
   # Parses the formula for numerator or denominator, outputs a human-readable
   # calculation and a list of validation "values".
@@ -309,8 +332,8 @@ class DHIS2Parser():
     # formula so that we don't duplicate error messages.
     vbls_seen = []
   
-    # all possible formula terms: ([#ACDIR]|OUG){xxxxxx}, sometimes 
-    #   ([#ACDIR]|OUG){xxxxx.xxxxx}, operators (+,-,*), and numbers (int).
+    # all possible formula terms: ([#ACDIR]|OUG){xxxx.xxx.xx} sometimes 
+    #   with wildcards (*) or fewer sub-terms, operators (+,-,*), and numbers.
     # see https://docs.dhis2.org/master/en/developer/html/webapi_indicators.html
     # create a list of id's, navigate to their url, and replace the num/den
     #   id's with the descriptions.
@@ -318,14 +341,14 @@ class DHIS2Parser():
     vbl_regex = '(' + vbl_prefix_regex +\
                 '\{([\w|\*]*)\.?([\w|\*]*)\.?([\w|\*|_]*)\})'
     oper_regex = '([\+\-\/\*])'
-    number_regex = '(\d+)'
+    number_regex = '(\d+\.\d+)'
     total_regex = vbl_regex + '|' + oper_regex + '|' + number_regex
     
     parsed_formula = re.finditer(total_regex, formula)
     number_seen = (number is None)
     
     for term in parsed_formula:
-      if (term.group(0).isdigit() or
+      if (re.match(number_regex, term.group(0)) or
           re.match(oper_regex, term.group(0))):
         calculation += ' ' + term.group(0)
         if (term.group(0).isdigit() and
@@ -402,19 +425,19 @@ class DHIS2Parser():
       values['Validation values'].append(
         [ ValidationErrCode.INDIC_NO_DISPLAY_NAME, [indicator_id] ]
       )
+    values['Indicator name'] = display_name
 
     indicator_type_number = 1
     if 'indicatorType' in indicator_json and \
       'id' in indicator_json['indicatorType']:
       it_id = indicator_json['indicatorType']['id']
-      if it_id in self.indicator_type_map:
-        indicator_type_number = self.indicator_type_map[it_id]
+      if it_id in self._indicator_type_map:
+        indicator_type_number = self._indicator_type_map[it_id]
     indicator_number = extract_numerical_factor(display_name, True)
     if indicator_number == 1: indicator_number = None
 
-    values['Indicator name'] = display_name
     values['Indicator Url'], values['Display Url'] =\
-      construct_display_url(self.auth['baseUrl'],
+      construct_display_url(self._auth['baseUrl'],
                             'indicators',
                             indicator_id,
                             display_name)
@@ -445,7 +468,8 @@ class DHIS2Parser():
     if denominator_number == 1:
       denominator_number = None
 
-    if (indicator_number and indicator_number != denominator_number and
+    if (indicator_number and
+        indicator_number != denominator_number and
         indicator_number != numerator_number and
         indicator_number != indicator_type_number):
       values['Validation values'].append(
@@ -471,7 +495,13 @@ class DHIS2Parser():
       )
     if (denominator == '1') ^ (values['Denominator description'] == '1'):
       values['Validation values'].append(
-        [ValidationErrCode.DENOM_FORMULA_NO_MATCH, []]
+        [ ValidationErrCode.DENOM_FORMULA_NO_MATCH, [] ]
+      )
+      
+    # TODO: make this check also test term reordering (that is, A+B+C = A+C+B)
+    if numerator == denominator:
+      values['Validation values'].append(
+        [ ValidationErrCode.NUMER_EQS_DENOM, [] ]
       )
 
     # do the parsing of the calculation
@@ -482,7 +512,7 @@ class DHIS2Parser():
                                                     'numerator')
     values['Calculation'] += numer_calc
     values['Validation values'].extend(numer_vvalues)
-      
+
     values['Calculation'] += ' } / {'
 
     denom_calc, denom_vvalues = self._parse_formula(denominator,
@@ -495,27 +525,27 @@ class DHIS2Parser():
 
     return values
     
-  def add_desc_to_dict(self, indicator_id):
-    if indicator_id in self.indic_to_desc: return
-    self.indic_to_desc[indicator_id] =\
+  def _add_desc_to_dict(self, indicator_id):
+    if indicator_id in self._indic_to_desc: return
+    self._indic_to_desc[indicator_id] =\
       self._get_indicator_description(indicator_id)
     return
     
   def output_all_indicators(self):
-    if self.element_type != 'indicators':
+    if self._element_type != 'indicators':
       return []
       
     output_values = []
     with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-      executor.map(self.add_desc_to_dict, self.element_ids)
+      executor.map(self._add_desc_to_dict, self._element_ids)
       
-    for indicator_id in self.element_ids:
+    for indicator_id in self._element_ids:
       tmp_desc = dict(zip(fieldnames, map(lambda x: '', fieldnames)))
       tmp_desc['Validation values'] = [
         [ ValidationErrCode.INDIC_PARSE_FAILED, [indicator_id] ]
       ]
-      if indicator_id in self.indic_to_desc:
-        tmp_desc = self.indic_to_desc[indicator_id].copy()
+      if indicator_id in self._indic_to_desc:
+        tmp_desc = self._indic_to_desc[indicator_id].copy()
       tmp_desc['Group Description'] = self.group_desc
       output_values.append(tmp_desc)
       
@@ -535,20 +565,33 @@ def main(args):
   if args.auth_token:
     auth['token'] = args.auth_token
 
-  dhis_parser = DHIS2Parser(auth)
+  dhis_parser = None
+  try:
+    dhis_parser = DHIS2Parser(auth)
+  except ValueError as err:
+    print(str(err), file=sys.stderr)
+    print(json.dumps({ 'status': 500, 'error': str(err) }))
+    return
 
   group_ids = []
   if args.group_ids:
     group_ids = args.group_ids.split(',')
   elif args.group_desc:
     group_ids = get_group_ids_from_group_desc(auth, args.group_desc)
-    
+
+  # The run will continue even with bad group_ids.
+  # TODO: Figure out how to add the error messages to the JSON output.
   for group_id in group_ids:
     try:
       dhis_parser.set_group_id(group_id)
+    except ValueError as err:
+      print(str(err), file=sys.stderr)
+      continue
+    try:
       output_values += dhis_parser.output_all_indicators()
     except:
-      print("Failed to output indicators for group id {}".format(group_id), file=sys.stderr)
+      print('Failed to output indicators for group id {}'.format(group_id),
+            file=sys.stderr)
 
   if output_format == 'csv':
     print(','.join(fieldnames) + ',Validation Comments')
@@ -569,20 +612,23 @@ def main(args):
   elif output_format == 'json':
     indicator_groups = {}
     for value in output_values:
-      del value['Display Url']
+      if 'Display Url' in value:
+        del value['Display Url']
       value['Validation codes'] = {}
-      for code in value['Validation values']:
-        if not code[0].name in value['Validation codes']:
-          value['Validation codes'][code[0].name] = []
-        value['Validation codes'][code[0].name].append(code[1])
-      del value['Validation values']
+      if 'Validation values' in value:
+        for code in value['Validation values']:
+          if not code[0].name in value['Validation codes']:
+            value['Validation codes'][code[0].name] = []
+          value['Validation codes'][code[0].name].append(code[1])
+        del value['Validation values']
       if len(value['Validation codes']) == 0:
         value['Validation codes'] = { ValidationErrCode.NO_ERRORS.name: [] }
-      igroup = value['Group Description']
-      del value['Group Description']
-      if not igroup in indicator_groups:
-        indicator_groups[igroup] = []
-      indicator_groups[igroup].append(camel_case_keys(value))
+      if 'Group Description' in value:
+        igroup = value['Group Description']
+        del value['Group Description']
+        if not igroup in indicator_groups:
+          indicator_groups[igroup] = []
+        indicator_groups[igroup].append(camel_case_keys(value))
 
     final_output_vals = []
     for igroup in indicator_groups:
@@ -596,6 +642,7 @@ def main(args):
               'validationCodeDict': vcode_dict
             }, indent=4, sort_keys=True)
          )
+
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
