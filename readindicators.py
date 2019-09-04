@@ -159,9 +159,10 @@ def camel_case_keys(value_dict):
 #   4) handle decimal extraction
 def extract_numerical_factor(display_text, is_multiplicative=False):
   factor_dict = { 'ten': 10, 'hundred': 100, 'thousand': 1000,
-                  'million': 1000000, 'billion': 1000000000, 'percent': 100 }
+                  'million': 1000000, 'billion': 1000000000, 'percent': 100,
+                  'cent': 100 }
   factor_regex = '(?:^|\s)(' + '|'.join(factor_dict.keys()) + ')(?:\s|$)'
-  
+
   # If we are looking for a multiplicative factor, we either want 'per 1000'
   # or '* 1000' or '1000 *', for example. Only relevant to display text for
   # indicators/numerators/denominators -- generally not relevant to 
@@ -172,21 +173,23 @@ def extract_numerical_factor(display_text, is_multiplicative=False):
   if number_match:
     number = int(number_match.group(1)) if len(number_match.groups()) < 3 else \
       int(number_match.group(1) or number_match.group(2))
-    return number
+    return number, str(number)
 
   # Bit of a cheaty way of capturing "per thousand", "per ten thousand", and
   # "per ten-thousand". Might be better to do a split on [_\W], and match
   # against the keys. TODO?                        
   if re.search(factor_regex, re.sub('\s|\-', '  ', display_text)):
     number = 1
+    factor_list = []
     for factor in re.finditer(factor_regex,
                               re.sub('\s|\-', '  ', display_text)):
       number *= factor_dict[factor.group(1)]
-    return number
+      factor_list.append(factor.group(1))
+    return number, ' '.join(factor_list) + ''
 
-  return None
+  return None, ''
 
-          
+
 class DHIS2Parser():
   """ A class to parse DHIS2 system metadata for indicatorGroups.
       Will technically also work for dataElementGroups.
@@ -233,8 +236,8 @@ class DHIS2Parser():
         else:
           number = 1
           if 'displayName' in indic_type:
-            number = extract_numerical_factor(indic_type['displayName'],
-                                              False)
+            number, _ = extract_numerical_factor(indic_type['displayName'],
+                                                 False)
             if not number:
               number = 1
           self._indicator_type_map[indic_type['id']] = number
@@ -324,7 +327,7 @@ class DHIS2Parser():
      
   # Parses the formula for numerator or denominator, outputs a human-readable
   # calculation and a list of validation "values".
-  def _parse_formula(self, formula, number, quantity_type):
+  def _parse_formula(self, formula, number, number_str, quantity_type):
     calculation = ''
     vvalues = []
     
@@ -397,7 +400,7 @@ class DHIS2Parser():
                 vvalues.append([ aoc_vcode, aoc_vvalues ])
     if not number_seen:
       vvalues.append(
-        [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, str(number)]]
+        [ValidationErrCode.FORMULA_NUMBER_MISSING, [quantity_type, number_str]]
       )
 
     return calculation, vvalues
@@ -433,8 +436,10 @@ class DHIS2Parser():
       it_id = indicator_json['indicatorType']['id']
       if it_id in self._indicator_type_map:
         indicator_type_number = self._indicator_type_map[it_id]
-    indicator_number = extract_numerical_factor(display_name, True)
-    if indicator_number == 1: indicator_number = None
+    indic_number, indic_num_str = extract_numerical_factor(display_name, True)
+    if indic_number == 1:
+      indic_number = None
+      indic_num_str = ''
 
     values['Indicator Url'], values['Display Url'] =\
       construct_display_url(self._auth['baseUrl'],
@@ -449,7 +454,7 @@ class DHIS2Parser():
     else:
       values['Validation values'].append([ValidationErrCode.NUMER_NO_DESC, []])
 
-    numerator_number = extract_numerical_factor(
+    numerator_number, numerator_num_str = extract_numerical_factor(
       values['Numerator description'], True
     )
       
@@ -462,18 +467,19 @@ class DHIS2Parser():
     else:
       values['Validation values'].append([ValidationErrCode.DENOM_NO_DESC, []])
         
-    denominator_number = extract_numerical_factor(
+    denominator_number, denominator_num_str = extract_numerical_factor(
       values['Denominator description'], True
     )
     if denominator_number == 1:
       denominator_number = None
+      denominator_num_str = ''
 
-    if (indicator_number and
-        indicator_number != denominator_number and
-        indicator_number != numerator_number and
-        indicator_number != indicator_type_number):
+    if (indic_number and
+        indic_number != denominator_number and
+        indic_number != numerator_number and
+        indic_number != indicator_type_number):
       values['Validation values'].append(
-        [ ValidationErrCode.INDIC_NUMBER_MISSING, [str(indicator_number)] ]
+        [ ValidationErrCode.INDIC_NUMBER_MISSING, [indic_num_str] ]
       )
 
     # get the numerator formula
@@ -509,6 +515,7 @@ class DHIS2Parser():
 
     numer_calc, numer_vvalues = self._parse_formula(numerator,
                                                     numerator_number,
+                                                    numerator_num_str,
                                                     'numerator')
     values['Calculation'] += numer_calc
     values['Validation values'].extend(numer_vvalues)
@@ -517,6 +524,7 @@ class DHIS2Parser():
 
     denom_calc, denom_vvalues = self._parse_formula(denominator,
                                                     denominator_number,
+                                                    denominator_num_str,
                                                     'denominator')
     values['Calculation'] += denom_calc
     values['Validation values'].extend(denom_vvalues)
